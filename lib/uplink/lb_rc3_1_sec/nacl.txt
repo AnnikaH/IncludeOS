@@ -1,0 +1,52 @@
+Iface uplink {
+    address: 10.20.17.62,
+    netmask: 255.255.255.0,
+    gateway: 10.20.17.1,
+    index: 0
+}
+
+Iface outside {
+    address: 10.20.17.63,
+    netmask: 255.255.255.0,
+    gateway: 10.20.17.1,
+    index: 1
+}
+
+Iface inside {
+    address: 10.20.17.64,
+    netmask: 255.255.255.0,
+    gateway: 10.20.17.1,
+    index: 2
+}
+
+Load_balancer lb {
+    layer: tcp,
+    clients: {
+        iface: outside,
+        port: 80,
+        wait_queue_limit: 1000,
+        session_limit: 1000
+    },
+    servers: {
+        iface: inside,
+        algorithm: round_robin,
+        pool: [
+            {
+                address: 10.20.17.1,
+                port: 6001
+            },
+            {
+                address: 10.20.17.1,
+                port: 6002
+            },
+            {
+                address: 10.20.17.1,
+                port: 6003
+            },
+            {
+                address: 10.20.17.1,
+                port: 6004
+            }
+        ]
+    }
+}

@@ -79,6 +79,7 @@ public:
    */
   void on_request(http::Request_ptr req, http::Response_writer_ptr writer)
   {
+    printf("WS connector.hpp: on_request\n");
     if (on_accept_)
     {
       const bool accepted = on_accept_(writer->connection().peer(),
@@ -94,6 +95,7 @@ public:
     assert(ws->get_cpuid() == SMP::cpu_id());
 
     if(ws == nullptr) {
+      printf("WS connector.hpp: ws == nullptr - not handled\n");
     } // not ok
 
     on_connect_(std::move(ws));
@@ -135,6 +137,7 @@ public:
    */
   static Response_handler create_response_handler(ConnectCallback cb, std::string key)
   {
+    printf("WS connector.hpp: create_response_handler 2\n");
     // @todo Try replace with unique_ptr
     // create a new instance of a client connector
     //auto ptr = std::unique_ptr<WS_client_connector>{
@@ -159,6 +162,7 @@ public:
    */
   Response_handler create_response_handler(std::string key)
   {
+    printf("WS connector.hpp: on_request 1\n");
     return create_response_handler(on_connect_, std::move(key));
   }
 
@@ -172,9 +176,11 @@ public:
    */
   void on_response(http::Error err, http::Response_ptr res, http::Connection& conn)
   {
+    printf("WS connector.hpp: on_response\n");
     auto ws = WebSocket::upgrade(err, *res, conn, key_);
 
     if(ws == nullptr) {
+      printf("WS connector.hpp: on_response: ws == nullptr - not handled\n");
     } // not ok
 
     on_connect_(std::move(ws));
