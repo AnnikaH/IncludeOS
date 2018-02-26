@@ -56,23 +56,23 @@ const char* WebSocket::to_string(op_code code)
 
 WebSocket_ptr WebSocket::upgrade(http::Request& req, http::Response_writer& writer)
 {
-  printf("WebSocket::upgrade 1\n");
+  debugM("WebSocket::upgrade 1\n");
   // validate handshake
   auto view = req.header().value("Sec-WebSocket-Version");
   if (view == nullptr || view != "13") {
-    printf("view == nullptr || view != 13\n");
+    debugM("view == nullptr || view != 13\n");
     writer.write_header(http::Bad_Request);
     return nullptr;
   }
 
   auto key = req.header().value("Sec-WebSocket-Key");
   if (key == nullptr || key.size() < 16) {
-    printf("key == nullptr || key.size() < 16\n");
+    debugM("key == nullptr || key.size() < 16\n");
     writer.write_header(http::Bad_Request);
     return nullptr;
   }
 
-  printf("Create handshake response\n");
+  debugM("Create handshake response\n");
 
   // create handshake response
   auto& header = writer.header();
@@ -85,37 +85,37 @@ WebSocket_ptr WebSocket::upgrade(http::Request& req, http::Response_writer& writ
 
   // discard streams which can be FIN-WAIT-1
   if (stream->is_connected()) {
-    printf("Stream is connected - returning websocket\n");
+    debugM("Stream is connected - returning websocket\n");
     // for now, only accept fully connected streams
     return std::make_unique<WebSocket>(std::move(stream), false);
   }
-  printf("Stream is not connected - returning nullptr\n");
+  debugM("Stream is not connected - returning nullptr\n");
   return nullptr;
 }
 
 WebSocket_ptr WebSocket::upgrade(http::Error err, http::Response& res, http::Connection& conn, const std::string& key)
 {
-  printf("WebSocket::upgrade 2\n");
+  debugM("WebSocket::upgrade 2\n");
   if (err or res.status_code() != http::Switching_Protocols)
   {
-    printf("err or res.status_code() != http::Switching_Protocols - returning nullptr\n");
+    debugM("err or res.status_code() != http::Switching_Protocols - returning nullptr\n");
     return nullptr;
   }
   else
   {
-    printf("Validate response\n");
+    debugM("Validate response\n");
     /// validate response
     auto hash = res.header().value("Sec-WebSocket-Accept");
     if (hash.empty() or hash != encode_hash(key))
     {
-      printf("hash is empty or hash != encode_hash(key) - returning nullptr\n");
+      debugM("hash is empty or hash != encode_hash(key) - returning nullptr\n");
       return nullptr;
     }
-    printf("Creating open websocket\n");
+    debugM("Creating open websocket\n");
     /// create open websocket
     auto stream = conn.release();
     assert(stream->is_connected());
-    printf("Returning websocket\n");
+    debugM("Returning websocket\n");
     // create client websocket and call callback
     return std::make_unique<WebSocket>(std::move(stream), true);
   }
@@ -123,7 +123,7 @@ WebSocket_ptr WebSocket::upgrade(http::Error err, http::Response& res, http::Con
 
 std::vector<char> WebSocket::generate_key()
 {
-  printf("WebSocket::generate_key\n");
+  debugM("WebSocket::generate_key\n");
   std::vector<char> key(16);
   uint16_t v;
   for (size_t i = 0; i < key.size(); i += sizeof(v))
@@ -137,7 +137,7 @@ std::vector<char> WebSocket::generate_key()
 http::Server::Request_handler WebSocket::create_request_handler(
   Connect_handler on_connect, Accept_handler on_accept)
 {
-  printf("WebSocket::create_request_handler\n");
+  debugM("WebSocket::create_request_handler\n");
   return http::Server::Request_handler::make_packed(
     [
       on_connect{std::move(on_connect)},
@@ -165,7 +165,7 @@ http::Server::Request_handler WebSocket::create_request_handler(
 http::Client::Response_handler WebSocket::create_response_handler(
   Connect_handler on_connect, std::string key)
 {
-  printf("WebSocket::create_response_handler\n");
+  debugM("WebSocket::create_response_handler\n");
   return http::Client::Response_handler::make_packed(
     [
       on_connect{std::move(on_connect)},
@@ -184,7 +184,7 @@ void WebSocket::connect(
       uri::URI        remote,
       Connect_handler callback)
 {
-  printf("WebSocket::connect\n");
+  debugM("WebSocket::connect\n");
   // doesn't have to be extremely random, just random
   std::string key  = base64::encode(generate_key());
   http::Header_set ws_headers {
@@ -194,7 +194,7 @@ void WebSocket::connect(
       {"Sec-WebSocket-Version", "13"},
       {"Sec-WebSocket-Key",     key }
   };
-  printf("Sending HTTP request\n");
+  debugM("Sending HTTP request\n");
   // send HTTP request
   client.get(remote, ws_headers,
     WS_client_connector::create_response_handler(std::move(callback), std::move(key)));
@@ -202,15 +202,15 @@ void WebSocket::connect(
 
 void WebSocket::read_data(net::tcp::buffer_t buf)
 {
-  printf("WebSocket::read_data\n");
+  debugM("WebSocket::read_data\n");
   // silently ignore data for reset connection
   if (this->stream == nullptr) {
-    printf("Stream == nullptr - ignoring data for reset connection\n");
+    debugM("Stream == nullptr - ignoring data for reset connection\n");
     return;
   }
 
   size_t len = buf->size();
-  printf("buf len: %zu\n", len);
+  debugM("Buffer length: %zu\n", len);
   const uint8_t* data = buf->data();
   while (len)
   {
@@ -229,7 +229,7 @@ void WebSocket::read_data(net::tcp::buffer_t buf)
     }
 
     if (message->is_complete()) {
-      printf("Message is complete - finalizing message\n");
+      debugM("Message is complete - finalizing message\n");
       finalize_message();
     }
   }
@@ -237,7 +237,9 @@ void WebSocket::read_data(net::tcp::buffer_t buf)
 
 size_t WebSocket::Message::append(const uint8_t* data, size_t len)
 {
-  printf("WebSocket::Message::append\nLen: %zu\n", len);
+  debugM("WebSocket::Message::append");
+  debugM("Len: %zu\n", len);
+
   size_t total = 0;
   // more partial header
   if (UNLIKELY(this->header_complete() == false))
@@ -259,13 +261,13 @@ size_t WebSocket::Message::append(const uint8_t* data, size_t len)
     data_.insert(data_.end(), data, data + insert_size);
     total += insert_size;
   }
-  printf("Returning total: %zu\n", total);
+  debugM("Returning total: %zu\n", total);
   return total;
 }
 
 size_t WebSocket::create_message(const uint8_t* buf, size_t len)
 {
-  printf("WebSocket::create_message\n");
+  debugM("WebSocket::create_message\n");
   // parse header
   if (len < sizeof(ws_header)) {
     failure("read_data: Header was too short");
@@ -304,27 +306,27 @@ size_t WebSocket::create_message(const uint8_t* buf, size_t len)
   }
 
   this->message = std::make_unique<Message>(buf, len);
-  printf("Returning len: %zu\n", len);
+  debugM("Returning len: %zu\n", len);
   return len;
 }
 
 void WebSocket::finalize_message()
 {
-  printf("WebSocket::finalize_message\n");
+  debugM("WebSocket::finalize_message\n");
   Expects(message != nullptr and message->is_complete());
   message->unmask();
   const auto& hdr = message->header();
   switch (hdr.opcode()) {
   case op_code::TEXT:
   case op_code::BINARY:
-    printf("op_code::BINARY or TEXT\n");
+    debugM("op_code::BINARY or TEXT\n");
     /// .. call on_read
     if (on_read != nullptr) {
       on_read(std::move(message));
     }
     return;
   case op_code::CLOSE:
-    printf("op_code::CLOSE\n");
+    debugM("op_code::CLOSE\n");
     // they are angry with us :(
     if (hdr.data_length() >= 2) {
       // provide reason to user
@@ -339,19 +341,18 @@ void WebSocket::finalize_message()
     this->close();
     break;
   case op_code::PING:
-    printf("op_code::PING\n");
+    debugM("op_code::PING\n");
     if (on_ping(hdr.data(), hdr.data_length())) // if return true, pong back
       write_opcode(op_code::PONG, hdr.data(), hdr.data_length());
     break;
   case op_code::PONG:
-    printf("op_code::PONG\n");
+    debugM("op_code::PONG\n");
     ping_timer.stop();
     if (on_pong != nullptr)
       on_pong(hdr.data(), hdr.data_length());
     break;
   default:
-    printf("Default - unknown opcode\n");
-    //printf("Unknown opcode: %d\n", (int) hdr.opcode());
+    debugM("Default: Unknown opcode: %d\n", (int) hdr.opcode());
     break;
   }
   message.reset();
@@ -361,7 +362,7 @@ void WebSocket::finalize_message()
     with the intention of appending the message on the returned buffer */
 static Stream::buffer_t create_wsmsg(size_t len, op_code code, bool client)
 {
-  printf("create_wsmsg\n");
+  debugM("create_wsmsg\n");
   // generate header length based on buffer length
   const size_t header_len = net::ws_header::header_length(len, client);
   // create shared buffer with position at end of header
@@ -384,7 +385,8 @@ static Stream::buffer_t create_wsmsg(size_t len, op_code code, bool client)
 
 void WebSocket::write(const char* data, size_t len, op_code code)
 {
-  printf("WebSocket::write 1\nLen: %zu\nOp code: %hhu", len, code);
+  debugM("WebSocket::write 1\n");
+  debugM("Len: %zu. Op code: %hhu\n", len, code);
   if (UNLIKELY(this->stream == nullptr)) {
     failure("write: Already closed");
     return;
@@ -414,7 +416,8 @@ void WebSocket::write(const char* data, size_t len, op_code code)
 }
 void WebSocket::write(net::tcp::buffer_t buffer, op_code code)
 {
-  printf("WebSocket::write 2\nCode: %hhu\n", code);
+  debugM("WebSocket::write 2\n");
+  debugM("Code: %hhu\n", code);
   if (UNLIKELY(this->stream == nullptr)) {
     failure("write: Already closed");
     return;
@@ -439,7 +442,8 @@ void WebSocket::write(net::tcp::buffer_t buffer, op_code code)
 }
 bool WebSocket::write_opcode(op_code code, const char* buffer, size_t datalen)
 {
-  printf("WebSocket::write_opcode\nDatalen: %zu\n", datalen);
+  debugM("WebSocket::write_opcode\n");
+  debugM("Datalen: %zu\n", datalen);
   if (UNLIKELY(stream == nullptr || stream->is_writable() == false)) {
     return false;
   }
@@ -453,7 +457,7 @@ bool WebSocket::write_opcode(op_code code, const char* buffer, size_t datalen)
 }
 void WebSocket::tcp_closed()
 {
-  printf("WebSocket::tcp_closed\n");
+  debugM("WebSocket::tcp_closed\n");
   if (this->on_close != nullptr) this->on_close(1000);
   this->reset();
 }
@@ -487,7 +491,7 @@ WebSocket::~WebSocket()
 
 void WebSocket::close()
 {
-  printf("WebSocket::close\n");
+  debugM("WebSocket::close\n");
   /// send CLOSE message
   if (this->stream->is_writable())
       this->write_opcode(op_code::CLOSE, nullptr, 0);
@@ -498,7 +502,7 @@ void WebSocket::close()
 
 void WebSocket::reset()
 {
-  printf("WebSocket::reset\n");
+  debugM("WebSocket::reset\n");
   this->on_close = nullptr;
   this->on_error = nullptr;
   this->on_read  = nullptr;
@@ -513,14 +517,14 @@ void WebSocket::reset()
 
 void WebSocket::failure(const std::string& reason)
 {
-  printf("WebSocket::failure - reason: %s\n", reason.c_str());
+  debugM("WebSocket::failure - reason: %s\n", reason.c_str());
   if (stream != nullptr) stream->close();
   if (this->on_error) on_error(reason);
 }
 
 const char* WebSocket::status_code(uint16_t code)
 {
-  printf("WebSocket::status_code: %u\n", code);
+  debugM("WebSocket::status_code: %u\n", code);
   switch (code) {
   case 1000:
       return "Closed";

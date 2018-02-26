@@ -27,6 +27,13 @@
 #include <stdexcept>
 #include <vector>
 
+#include <debug_mothership_team>
+#ifdef DEBUG_MOTHERSHIP_TEAM
+#define debugM(fmt, ...) debugMothership("WebSocket", fmt, ##__VA_ARGS__)
+#else
+#define debugM(fmt, ...)
+#endif
+
 namespace net {
 
 struct WS_error : public std::runtime_error {
@@ -215,13 +222,14 @@ public:
 
   bool ping(const char* buffer, size_t len, Timer::duration_t timeout)
   {
-    printf("WebSocket::ping 1\nLen: %zu\n", len);
+    debugM("WebSocket::ping 1\n");
+    debugM("Len: %zu\n", len);
     ping_timer.start(timeout);
     return write_opcode(op_code::PING, buffer, len);
   }
   bool ping(Timer::duration_t timeout)
   {
-    printf("WebSocket::ping 2\n");
+    debugM("WebSocket::ping 2\n");
     return ping(nullptr, 0, timeout);
   }
 
@@ -288,7 +296,7 @@ private:
 
   void pong_timeout()
   {
-    printf("WebSocket::pong_timeout\n");
+    debugM("WebSocket::pong_timeout\n");
     if (on_pong_timeout)
       on_pong_timeout(*this);
     else

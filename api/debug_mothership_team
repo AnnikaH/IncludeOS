@@ -1,0 +1,14 @@
+#pragma once
+#ifndef API_DEBUG_MOTHERSHIP_TEAM_HEADER
+#define API_DEBUG_MOTHERSHIP_TEAM_HEADER
+
+#include <info>
+
+#define DEBUG_MOTHERSHIP_TEAM 1
+#ifdef DEBUG_MOTHERSHIP_TEAM
+#define debugMothership(from, fmt, ...) INFO(from, fmt, ##__VA_ARGS__)
+#else
+#define debugMothership(from, fmt, ...) /* fmt */
+#endif
+
+#endif
