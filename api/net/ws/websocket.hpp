@@ -215,11 +215,15 @@ public:
 
   bool ping(const char* buffer, size_t len, Timer::duration_t timeout)
   {
+    printf("WebSocket::ping 1\nLen: %zu\n", len);
     ping_timer.start(timeout);
     return write_opcode(op_code::PING, buffer, len);
   }
   bool ping(Timer::duration_t timeout)
-  { return ping(nullptr, 0, timeout); }
+  {
+    printf("WebSocket::ping 2\n");
+    return ping(nullptr, 0, timeout);
+  }
 
   //void ping(net::tcp::buffer_t, Timer::duration_t timeout);
 
@@ -284,6 +288,7 @@ private:
 
   void pong_timeout()
   {
+    printf("WebSocket::pong_timeout\n");
     if (on_pong_timeout)
       on_pong_timeout(*this);
     else

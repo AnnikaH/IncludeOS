@@ -210,6 +210,7 @@ void WebSocket::read_data(net::tcp::buffer_t buf)
   }
 
   size_t len = buf->size();
+  printf("buf len: %zu\n", len);
   const uint8_t* data = buf->data();
   while (len)
   {
@@ -236,6 +237,7 @@ void WebSocket::read_data(net::tcp::buffer_t buf)
 
 size_t WebSocket::Message::append(const uint8_t* data, size_t len)
 {
+  printf("WebSocket::Message::append\nLen: %zu\n", len);
   size_t total = 0;
   // more partial header
   if (UNLIKELY(this->header_complete() == false))
@@ -257,6 +259,7 @@ size_t WebSocket::Message::append(const uint8_t* data, size_t len)
     data_.insert(data_.end(), data, data + insert_size);
     total += insert_size;
   }
+  printf("Returning total: %zu\n", total);
   return total;
 }
 
@@ -300,9 +303,8 @@ size_t WebSocket::create_message(const uint8_t* buf, size_t len)
     return std::min(hdr.data_length(), len);
   }
 
-  printf("Returning len\n");
-
   this->message = std::make_unique<Message>(buf, len);
+  printf("Returning len: %zu\n", len);
   return len;
 }
 
@@ -382,7 +384,7 @@ static Stream::buffer_t create_wsmsg(size_t len, op_code code, bool client)
 
 void WebSocket::write(const char* data, size_t len, op_code code)
 {
-  printf("WebSocket::write 1\n");
+  printf("WebSocket::write 1\nLen: %zu\nOp code: %hhu", len, code);
   if (UNLIKELY(this->stream == nullptr)) {
     failure("write: Already closed");
     return;
@@ -412,7 +414,7 @@ void WebSocket::write(const char* data, size_t len, op_code code)
 }
 void WebSocket::write(net::tcp::buffer_t buffer, op_code code)
 {
-  printf("WebSocket::write 2\n");
+  printf("WebSocket::write 2\nCode: %hhu\n", code);
   if (UNLIKELY(this->stream == nullptr)) {
     failure("write: Already closed");
     return;
@@ -437,7 +439,7 @@ void WebSocket::write(net::tcp::buffer_t buffer, op_code code)
 }
 bool WebSocket::write_opcode(op_code code, const char* buffer, size_t datalen)
 {
-  printf("WebSocket::write_opcode\n");
+  printf("WebSocket::write_opcode\nDatalen: %zu\n", datalen);
   if (UNLIKELY(stream == nullptr || stream->is_writable() == false)) {
     return false;
   }
