@@ -164,7 +164,7 @@ namespace uplink {
 
     retry_backoff = 0;
 
-    debugM("Auth success (token received)\n");
+    MYINFO("Auth success (token received)\n");
     token_ = res->body().to_string();
 
     debugM("Ready to dock\n");
