@@ -105,7 +105,7 @@ namespace uplink {
   {
     debugM("WS_uplink::store\n");
     // BINARY HASH
-    store.add_string(0, binary_hash_);
+    store.add_string(0, update_hash_);
     // nanos timestamp of when update begins
     store.add<uint64_t> (1, OS::nanos_since_boot());
   }
@@ -141,7 +141,8 @@ namespace uplink {
     client_->post(http::URI{url},
       { {"Content-Type", "application/json"} },
       auth_data(),
-      {this, &WS_uplink::handle_auth_response});
+      {this, &WS_uplink::handle_auth_response},
+      http::Client::Options{15s});
   }
 
   void WS_uplink::handle_auth_response(http::Error err, http::Response_ptr res, http::Connection&)
@@ -164,8 +165,8 @@ namespace uplink {
 
     retry_backoff = 0;
 
-    debugM("Auth success (token received)\n");
-    token_ = res->body().to_string();
+    MYINFO("Auth success (token received)");
+    token_ = std::string(res->body());
 
     debugM("Ready to dock\n");
 
@@ -360,13 +361,13 @@ namespace uplink {
 
     static SHA1 checksum;
     checksum.update(buffer);
-    binary_hash_ = checksum.as_hex();
+    update_hash_ = checksum.as_hex();
 
     debugM("Creating transport to tell that the update has been received\n");
 
     // send a reponse with the to tell we received the update
-    auto trans = Transport{Header{Transport_code::UPDATE, static_cast<uint32_t>(binary_hash_.size())}};
-    trans.load_cargo(binary_hash_.data(), binary_hash_.size());
+    auto trans = Transport{Header{Transport_code::UPDATE, static_cast<uint32_t>(update_hash_.size())}};
+    trans.load_cargo(update_hash_.data(), update_hash_.size());
     ws_->write(trans.data().data(), trans.data().size());
     ws_->close();
 
