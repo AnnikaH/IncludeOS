@@ -352,6 +352,7 @@ void WebSocket::finalize_message()
       on_pong(hdr.data(), hdr.data_length());
     break;
   default:
+    //printf("Unknown opcode: %d\n", (int) hdr.opcode());
     debugM("Default: Unknown opcode: %d\n", (int) hdr.opcode());
     break;
   }
