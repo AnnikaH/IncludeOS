@@ -1,0 +1,7 @@
+{
+  "net" : [
+    {"device" : "vmxnet3", "mac" : "97:01:0a:00:00:2a"},
+    {"device" : "vmxnet3", "mac" : "98:01:0a:00:00:2b"},
+    {"device" : "vmxnet3", "mac" : "99:01:0a:00:00:2c"}
+  ]
+}

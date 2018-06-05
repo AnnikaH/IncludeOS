@@ -71,6 +71,13 @@ static SSL_CTX* init_ssl_context(const std::string& certs_path, bool verify)
   return openssl::create_client(ents, verify);
 }
 
+#include <debug_mothership_team>
+#ifdef DEBUG_MOTHERSHIP_TEAM
+#define debugM(fmt, ...) debugMothership("Uplink", fmt, ##__VA_ARGS__)
+#else
+#define debugM(fmt, ...)
+#endif
+
 namespace uplink {
   constexpr std::chrono::seconds WS_uplink::heartbeat_interval;
 
@@ -83,7 +90,7 @@ namespace uplink {
   {
     if(liu::LiveUpdate::is_resumable() && OS::is_live_updated())
     {
-      MYINFO("Found resumable state, try restoring...");
+      MYINFO("Found resumable state, try restoring...\n");
       liu::LiveUpdate::resume("uplink", {this, &WS_uplink::restore});
 
       if(liu::LiveUpdate::partition_exists("conntrack"))
@@ -109,7 +116,7 @@ namespace uplink {
     // if not, register on config event
     else
     {
-      MYINFO("Interface %s not yet configured, starts when ready.", inet_.ifname().c_str());
+      MYINFO("Interface %s not yet configured, starts when ready.\n", inet_.ifname().c_str());
       inet_.on_config({this, &WS_uplink::start});
     }
   }
@@ -134,12 +141,13 @@ namespace uplink {
         http::Basic_client::Request_handler{this, &WS_uplink::inject_token});
     }
 
-    printf("WS_uplink::start: Calling auth()\n");
+    debugM("HTTP client created - now calling auth\n");
     auth();
   }
 
   void WS_uplink::store(liu::Storage& store, const liu::buffer_t*)
   {
+    debugM("WS_uplink::store\n");
     // BINARY HASH
     store.add_string(0, update_hash_);
     // nanos timestamp of when update begins
@@ -148,6 +156,8 @@ namespace uplink {
 
   void WS_uplink::restore(liu::Restore& store)
   {
+    debugM("WS_uplink::restore\n");
+
     // BINARY HASH
     binary_hash_ = store.as_string(); store.go_next();
 
@@ -181,6 +191,8 @@ namespace uplink {
 
   void WS_uplink::handle_auth_response(http::Error err, http::Response_ptr res, http::Connection&)
   {
+    debugM("WS_uplink::handle_auth_response\n");
+
     if(err)
     {
       MYINFO("[ %s ] Auth failed - %s", isotime::now().c_str(), err.to_string().c_str());
@@ -200,22 +212,28 @@ namespace uplink {
     MYINFO("[ %s ] Auth success (token received)", isotime::now().c_str());
     token_ = std::string(res->body());
 
+    debugM("Ready to dock\n");
+
     dock();
   }
 
   void WS_uplink::retry_auth()
   {
+    debugM("WS_uplink::retry_auth\n");
+
     if(retry_backoff < 6)
       ++retry_backoff;
 
     std::chrono::seconds secs{5 * retry_backoff};
 
-    MYINFO("Retry auth in %lld seconds...", secs.count());
+    MYINFO("Retry auth in %lld seconds...\n", secs.count());
     retry_timer.restart(secs, {this, &WS_uplink::auth});
   }
 
   void WS_uplink::dock()
   {
+    debugM("WS_uplink::dock\n");
+
     Expects(not token_.empty() and client_ != nullptr);
 
     const static std::string endpoint{"/dock"};
@@ -228,21 +246,27 @@ namespace uplink {
 
     MYINFO("[ %s ] Dock attempt to %s", isotime::now().c_str(), url.to_string().c_str());
 
+    debugM("Ready to connect\n");
+
     net::WebSocket::connect(*client_, url, {this, &WS_uplink::establish_ws});
   }
 
   void WS_uplink::establish_ws(net::WebSocket_ptr ws)
   {
+    debugM("WS_uplink::establish_ws\n");
+
     if(ws == nullptr) {
       MYINFO("[ %s ] Failed to establish websocket", isotime::now().c_str());
       retry_auth();
       return;
     }
 
+    debugM("Websocket != nullptr\n");
+
     ws_ = std::move(ws);
     ws_->on_read = {this, &WS_uplink::parse_transport};
     ws_->on_error = [](const auto& reason) {
-      MYINFO("(WS err) %s", reason.c_str());
+      MYINFO("(WS err) %s\n", reason.c_str());
     };
 
     ws_->on_close = {this, &WS_uplink::handle_ws_close};
@@ -273,35 +297,41 @@ namespace uplink {
 
   void WS_uplink::handle_ws_close(uint16_t code)
   {
+    debugM("WS_uplink::handle_ws_close\n");
     (void) code;
     auth();
   }
 
   bool WS_uplink::handle_ping(const char*, size_t)
   {
+    debugM("WS_uplink::handle_ping\n");
     last_ping = RTC::now();
     return true;
   }
 
   void WS_uplink::handle_pong_timeout(net::WebSocket&)
   {
+    debugM("WS_uplink::handle_pong_timeout\n");
     heart_retries_left--;
     MYINFO("[ %s ] ! Pong timeout. Retries left %i", isotime::now().c_str(), heart_retries_left);
   }
 
   void WS_uplink::on_heartbeat_timer()
   {
+    debugM("WS_uplink::on_heartbeat_timer\n");
 
     if (not is_online()) {
       MYINFO("Can't heartbeat on closed connection.");
       return;
     }
 
+    debugM("Is online\n");
+
     if(missing_heartbeat())
     {
       if (not heart_retries_left)
       {
-        MYINFO("No reply after %i pings. Reauth.", heartbeat_retries);
+        MYINFO("No reply after %i pings. Reauth.\n", heartbeat_retries);
         ws_->close();
         auth();
         return;
@@ -311,18 +341,25 @@ namespace uplink {
 
       if (not ping_ok)
       {
-        MYINFO("Heartbeat pinging failed. Reauth.");
+        MYINFO("Heartbeat pinging failed. Reauth.\n");
         auth();
         return;
       }
+
+      debugM("Heartbeat pinging ok\n");
     }
+
+    debugM("Starting heartbeat timer\n");
 
     heartbeat_timer.start(std::chrono::seconds(10));
   }
 
   void WS_uplink::parse_transport(net::WebSocket::Message_ptr msg)
   {
+    debugM("WS_uplink::parse_transport\n");
+
     if(msg != nullptr) {
+      debugM("msg is not nullptr - parsing\n");
       parser_.parse(msg->data(), msg->size());
     }
     else {
@@ -336,13 +373,18 @@ namespace uplink {
 
   void WS_uplink::handle_transport(Transport_ptr t)
   {
+    debugM("WS_uplink::handle_transport\n");
+
     if(UNLIKELY(t == nullptr))
     {
       MYINFO("[ %s ] Something went terribly wrong...", isotime::now().c_str());
       return;
     }
 
-    //MYINFO("New transport (%lu bytes)", t->size());
+    debugM("t != nullptr\n");
+
+    debugM("New transport (%lu bytes)\n", t->size());
+
     switch(t->code())
     {
       case Transport_code::UPDATE:
@@ -355,12 +397,14 @@ namespace uplink {
 
       case Transport_code::STATS:
       {
+        debugM("Transport code == STATS\n");
         send_stats();
         break;
       }
 
       default:
       {
+        debugM("Default transport code case\n");
         INFO2("Bad transport");
       }
     }
@@ -368,9 +412,13 @@ namespace uplink {
 
   void WS_uplink::update(std::vector<char> buffer)
   {
+    debugM("WS_uplink::update\n");
+
     static SHA1 checksum;
     checksum.update(buffer);
     update_hash_ = checksum.as_hex();
+
+    debugM("Creating transport to tell that the update has been received\n");
 
     // send a reponse with the to tell we received the update
     auto trans = Transport{Header{Transport_code::UPDATE, static_cast<uint32_t>(update_hash_.size())}};
@@ -385,6 +433,8 @@ namespace uplink {
     ws_->close();
     // make sure both the log and the close is flushed before updating
     inet_.nic().flush();
+
+    debugM("ws is now closed - starting update\n");
 
     // do the update
     try {
@@ -401,8 +451,12 @@ namespace uplink {
   template <typename Writer, typename Stack_ptr>
   void serialize_stack(Writer& writer, const Stack_ptr& stack)
   {
+    debugM("serialize_stack\n");
+
     if(stack != nullptr)
     {
+      debugM("stack != nullptr\n");
+
       writer.StartObject();
 
       writer.Key("name");
@@ -510,7 +564,7 @@ namespace uplink {
 
     std::string str = buf.GetString();
 
-    MYINFO("%s", str.c_str());
+    MYINFO("%s\n", str.c_str());
 
     send_message(Transport_code::IDENT, str.data(), str.size());
   }
@@ -537,7 +591,7 @@ namespace uplink {
 
     std::string str = buf.GetString();
 
-    MYINFO("%s", str.c_str());
+    MYINFO("%s\n", str.c_str());
 
     auto transport = Transport{Header{Transport_code::UPLINK, static_cast<uint32_t>(str.size())}};
     transport.load_cargo(str.data(), str.size());
@@ -546,6 +600,7 @@ namespace uplink {
 
   void WS_uplink::send_message(Transport_code code, const char* data, size_t len)
   {
+    debugM("WS_uplink::send_message\n");
     if(UNLIKELY(not is_online()))
       return;
 
@@ -558,20 +613,24 @@ namespace uplink {
 
   void WS_uplink::send_error(const std::string& err)
   {
+    debugM("WS_uplink::send_error\n");
     send_message(Transport_code::ERROR, err.c_str(), err.size());
   }
 
   void WS_uplink::send_log(const char* data, size_t len)
   {
+    debugM("WS_uplink::send_log\n");
     if(not config_.ws_logging)
       return;
 
     if(is_online() and ws_->get_connection()->is_writable())
     {
+      debugM("Is online and connection is writable - sending message\n");
       send_message(Transport_code::LOG, data, len);
     }
     else
     {
+      debugM("Is offline or connection is not writable - adding data to log buffer\n");
       // buffer for later
       logbuf_.insert(logbuf_.end(), data, data+len);
     }
@@ -579,12 +638,17 @@ namespace uplink {
 
   void WS_uplink::flush_log()
   {
+    debugM("WS_uplink::flush_log\n");
+
     if(not logbuf_.empty())
     {
+      debugM("Log buffer is not empty\n");
       if(config_.ws_logging)
       {
+        debugM("Sending message\n");
         send_message(Transport_code::LOG, logbuf_.data(), logbuf_.size());
       }
+      debugM("Clearing and shrinking buffer to fit\n");
       logbuf_.clear();
       logbuf_.shrink_to_fit();
     }
@@ -592,6 +656,7 @@ namespace uplink {
 
   void WS_uplink::send_stats()
   {
+    debugM("WS_uplink::send_stats\n");
     using namespace rapidjson;
 
     StringBuffer buf;
@@ -625,6 +690,7 @@ namespace uplink {
 
   std::shared_ptr<net::Conntrack> get_first_conntrack()
   {
+    debugM("get_first_conntrack\n");
     for(auto& stacks : net::Super_stack::inet().ip4_stacks()) {
       for(auto& stack : stacks)
       {
@@ -637,6 +703,7 @@ namespace uplink {
 
   void WS_uplink::store_conntrack(liu::Storage& store, const liu::buffer_t*)
   {
+    debugM("WS_uplink::store_conntrack\n");
     // NOTE: Only support serializing one conntrack atm
     auto ct = get_first_conntrack();
     if(not ct)
@@ -649,6 +716,7 @@ namespace uplink {
 
   void WS_uplink::restore_conntrack(liu::Restore& store)
   {
+    debugM("WS_uplink::restore_conntrack\n");
     // NOTE: Only support deserializing one conntrack atm
     auto ct = get_first_conntrack();
     if(not ct)
