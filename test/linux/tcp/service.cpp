@@ -20,7 +20,7 @@
 #include <hw/devices.hpp>
 #include <kernel/events.hpp>
 #include <drivers/usernet.hpp>
-#include <net/inet4>
+#include <net/inet>
 #include "../router/async_device.hpp"
 
 static const size_t CHUNK_SIZE = 1024 * 1024;
@@ -38,23 +38,14 @@ static inline auto now() {
 
 void Service::start()
 {
-  // Create some pure userspace Nic's
-  auto& nic1 = UserNet::create(1500);
-  auto& nic2 = UserNet::create(1500);
-
-  delegate<void(net::Packet_ptr)> delg1 {&nic1, &UserNet::receive};
-  delegate<void(net::Packet_ptr)> delg2 {&nic2, &UserNet::receive};
-
-  dev1 = std::make_unique<Async_device>(delg1);
-  dev2 = std::make_unique<Async_device>(delg2);
-
-  // Connect them with a wire
-  nic1.set_transmit_forward({dev2.get(), &Async_device::receive});
-  nic2.set_transmit_forward({dev1.get(), &Async_device::receive});
+  dev1 = std::make_unique<Async_device>(1500);
+  dev2 = std::make_unique<Async_device>(1500);
+  dev1->connect(*dev2);
+  dev2->connect(*dev1);
 
   // Create IP stacks on top of the nic's and configure them
-  auto& inet_server = net::Super_stack::get<net::IP4>(0);
-  auto& inet_client = net::Super_stack::get<net::IP4>(1);
+  auto& inet_server = net::Super_stack::get(0);
+  auto& inet_client = net::Super_stack::get(1);
   inet_server.network_config({10,0,0,42}, {255,255,255,0}, {10,0,0,1});
   inet_client.network_config({10,0,0,43}, {255,255,255,0}, {10,0,0,1});
 
@@ -98,10 +89,7 @@ void Service::start()
       if (not conn)
         std::abort();
 
-      for (int i = 0; i < NUM_CHUNKS; i++)
+      for (size_t i = 0; i < NUM_CHUNKS; i++)
         conn->write(buf);
-
     });
-
-
 }

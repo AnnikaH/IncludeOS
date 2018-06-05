@@ -28,6 +28,11 @@ namespace fs {
   public:
     static constexpr size_t SECTOR_SIZE = 512;
 
+    static MemDisk& get() noexcept {
+      static MemDisk memdisk;
+      return memdisk;
+    }
+
     std::string device_name() const override {
       return "memdisk" + std::to_string(id());
     }
@@ -59,6 +64,7 @@ namespace fs {
     bool write_sync(block_t, buffer_t) override { return true; };
 
     explicit MemDisk() noexcept;
+    explicit MemDisk(const char* start, const char* end) noexcept;
 
     void deactivate() override;
 

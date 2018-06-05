@@ -162,11 +162,11 @@ http::Server::Request_handler WebSocket::create_request_handler(
     });
 }
 
-http::Client::Response_handler WebSocket::create_response_handler(
+http::Basic_client::Response_handler WebSocket::create_response_handler(
   Connect_handler on_connect, std::string key)
 {
   debugM("WebSocket::create_response_handler\n");
-  return http::Client::Response_handler::make_packed(
+  return http::Basic_client::Response_handler::make_packed(
     [
       on_connect{std::move(on_connect)},
       key{std::move(key)}
@@ -180,9 +180,9 @@ http::Client::Response_handler WebSocket::create_response_handler(
 }
 
 void WebSocket::connect(
-      http::Client&   client,
-      uri::URI        remote,
-      Connect_handler callback)
+      http::Basic_client&   client,
+      uri::URI              remote,
+      Connect_handler       callback)
 {
   debugM("WebSocket::connect\n");
   // doesn't have to be extremely random, just random
@@ -200,7 +200,7 @@ void WebSocket::connect(
     WS_client_connector::create_response_handler(std::move(callback), std::move(key)));
 }
 
-void WebSocket::read_data(net::tcp::buffer_t buf)
+void WebSocket::read_data(Stream::buffer_t buf)
 {
   debugM("WebSocket::read_data\n");
   // silently ignore data for reset connection
@@ -224,6 +224,10 @@ void WebSocket::read_data(net::tcp::buffer_t buf)
     else
     {
       const size_t written = create_message(data, len);
+
+      if(UNLIKELY(message == nullptr))
+        return; // Something was invalid, error has been called and stream closed.
+
       len -= written;
       data += len;
     }
@@ -278,12 +282,13 @@ size_t WebSocket::create_message(const uint8_t* buf, size_t len)
 
   const auto& hdr = *(const ws_header*) buf;
 
-  // TODO: Add configuration for this, hardcoded max msgs of 5MB for now
-  if (hdr.data_length() > (1024 * 1024 * 5)) {
-    failure("read: Maximum message size exceeded (5MB)");
+  if(max_msg_size != 0 and hdr.data_length() > max_msg_size)
+  {
+    std::string msg{"read: Maximum message size exceeded: "};
+    msg.append(std::to_string(max_msg_size)).append(" bytes");
 
-    // consume and discard current message, leave any remaining data in buffer
-    return std::min(hdr.data_length(), len);
+    failure(std::move(msg));
+    return 0;
   }
 
   /*
@@ -321,25 +326,25 @@ void WebSocket::finalize_message()
   case op_code::BINARY:
     debugM("op_code::BINARY or TEXT\n");
     /// .. call on_read
-    if (on_read != nullptr) {
-      on_read(std::move(message));
+    if (this->on_read) {
+      this->m_busy = true;
+      this->on_read(std::move(message));
+      this->m_busy = false;
+      if (this->m_deferred_close) this->close(this->m_deferred_close);
     }
     return;
   case op_code::CLOSE:
     debugM("op_code::CLOSE\n");
-    // they are angry with us :(
     if (hdr.data_length() >= 2) {
       // provide reason to user
-      uint16_t reason = *(uint16_t*) message->data();
-      if (this->on_close)
-        this->on_close(__builtin_bswap16(reason));
+      uint16_t reason = htons(*(uint16_t*) message->data());
+      this->close(reason);
     }
     else {
-      if (this->on_close) this->on_close(1000);
+      this->close(1000);
     }
-    // close it down
-    this->close();
-    break;
+    // the websocket is DEAD after close()
+    return;
   case op_code::PING:
     debugM("op_code::PING\n");
     if (on_ping(hdr.data(), hdr.data_length())) // if return true, pong back
@@ -366,12 +371,9 @@ static Stream::buffer_t create_wsmsg(size_t len, op_code code, bool client)
   // generate header length based on buffer length
   const size_t header_len = net::ws_header::header_length(len, client);
   // create shared buffer with position at end of header
-  auto buffer = tcp::construct_buffer();
-  buffer->reserve(header_len + len);
-  buffer->resize(header_len);
+  auto buffer = tcp::construct_buffer(header_len);
   // create header on buffer
-  new (buffer->data()) ws_header;
-  auto& hdr = *(ws_header*) buffer->data();
+  auto& hdr = *(new (buffer->data()) ws_header);
   hdr.bits = 0;
   hdr.set_final();
   hdr.set_payload(len);
@@ -414,7 +416,7 @@ void WebSocket::write(const char* data, size_t len, op_code code)
   /// send everything as shared buffer
   this->stream->write(buf);
 }
-void WebSocket::write(net::tcp::buffer_t buffer, op_code code)
+void WebSocket::write(Stream::buffer_t buffer, op_code code)
 {
   debugM("WebSocket::write 2\n");
   debugM("Code: %hhu\n", code);
@@ -455,52 +457,38 @@ bool WebSocket::write_opcode(op_code code, const char* buffer, size_t datalen)
       this->stream->write(buffer, datalen);
   return true;
 }
-void WebSocket::tcp_closed()
-{
-  debugM("WebSocket::tcp_closed\n");
-  if (this->on_close != nullptr) this->on_close(1000);
-  this->reset();
-}
 
 WebSocket::WebSocket(net::Stream_ptr stream_ptr, bool client)
-  : stream(std::move(stream_ptr)), clientside(client)
+  : stream(std::move(stream_ptr)), max_msg_size(0), clientside(client)
 {
   assert(stream != nullptr);
   this->stream->on_read(8*1024, {this, &WebSocket::read_data});
-  this->stream->on_close({this, &WebSocket::tcp_closed});
+  this->stream->on_close({this, &WebSocket::close_callback_once});
 }
 
-WebSocket::WebSocket(WebSocket&& other)
-{
-  on_close = std::move(other.on_close);
-  on_error = std::move(other.on_error);
-  on_read  = std::move(other.on_read);
-  on_ping  = std::move(other.on_ping);
-  on_pong  = std::move(other.on_pong);
-  on_pong_timeout = std::move(other.on_pong_timeout);
-
-  stream   = std::move(other.stream);
-  clientside = other.clientside;
-  other.ping_timer.stop(); // ..
-}
-WebSocket::~WebSocket()
-{
-  if (stream != nullptr && stream->is_connected())
-      this->close();
-}
-
-void WebSocket::close()
+void WebSocket::close(const uint16_t reason)
 {
   debugM("WebSocket::close\n");
+  if (this->m_busy) {
+    this->m_deferred_close = reason; return;
+  }
+  assert(stream != nullptr);
   /// send CLOSE message
-  if (this->stream->is_writable())
-      this->write_opcode(op_code::CLOSE, nullptr, 0);
+  if (this->stream->is_writable()) {
+      uint16_t data = htons(reason);
+      this->write_opcode(op_code::CLOSE, (const char*) &data, sizeof(data));
+  }
   /// close and unset socket
   this->stream->close();
-  this->reset();
+}
+void WebSocket::close_callback_once()
+{
+  auto close_func = std::move(this->on_close);
+  this->reset_callbacks();
+  if (close_func) close_func(1000);
 }
 
-void WebSocket::reset()
+void WebSocket::reset_callbacks()
 {
   debugM("WebSocket::reset\n");
   this->on_close = nullptr;
@@ -509,16 +497,12 @@ void WebSocket::reset()
   this->on_ping  = nullptr;
   this->on_pong  = nullptr;
   this->on_pong_timeout = nullptr;
-  ping_timer.stop();
-  stream->reset_callbacks();
-  stream->close();
-  stream = nullptr;
 }
 
 void WebSocket::failure(const std::string& reason)
 {
   debugM("WebSocket::failure - reason: %s\n", reason.c_str());
-  if (stream != nullptr) stream->close();
+  if (this->stream != nullptr) this->stream->close();
   if (this->on_error) on_error(reason);
 }
 

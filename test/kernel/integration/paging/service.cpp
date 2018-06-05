@@ -21,9 +21,9 @@
 #include <service>
 #include <cassert>
 #include <iostream>
-#include "../../../../api/kernel/memory.hpp"
-#include "../../../../api/arch/x86_paging.hpp"
-#include "../../../../api/arch/x86_paging_utils.hpp"
+#include <kernel/memory.hpp>
+#include <arch/x86/paging.hpp>
+#include <arch/x86/paging_utils.hpp>
 #include <random>
 #include <vector>
 
@@ -56,6 +56,7 @@ struct Magic {
   void* last_access = nullptr;
   Pfault last_code{};
   int i = 0;
+  void(*heap_code)() = nullptr;
 };
 
 auto magic_loc = 42_TiB;
@@ -102,9 +103,6 @@ extern "C" void __cpu_exception(uintptr_t* regs, int error, uint32_t code){
 
   OS::reboot();
 }
-
-extern void print_entry(uintptr_t ent);
-
 
 template <typename E>
 struct enable_log {
@@ -192,18 +190,6 @@ void verify_test_entries(){
   std::vector<uintptr_t> test_entries
   { 0_b, 4_KiB, 8_KiB, 1_MiB, 2_MiB, 100_MiB, 1_GiB, 1002_MiB, 500_GiB, 513_GiB, magic_loc};
 
-  for (auto ent : test_entries) {
-    std::cout << "\nGetting entry 0x" << std::hex << ent << "\n";
-    auto leaf_ent = *__pml4->entry_r(ent);
-    std::cout << "Leaf: ";
-    print_entry(leaf_ent);
-    auto pml_ent = *__pml4->entry(ent);
-    std::cout << "PML4:";
-    print_entry(pml_ent);
-    std::cout << "Active page size: " << Byte_r(__pml4->active_page_size(ent)) << "\n";
-
-  }
-
   Expects(mem::active_page_size(0LU) == 4_KiB);
   Expects(mem::active_page_size(4_KiB) == 4_KiB);
   Expects(mem::active_page_size(200_MiB) == 2_MiB);
@@ -280,7 +266,6 @@ void verify_magic() {
   Expects(m.size == 4_KiB);
   Expects(m.lin  == magic_loc);
   Expects(m.phys == (uintptr_t)magic_phys);
-  Expects(m.page_count() == 1);
 
   if (magic_phys->id != '!') {
     *magic = Magic();
@@ -401,6 +386,7 @@ void map_non_aligned(){
 
 int main()
 {
+  void(*heap_code)() = (void(*)()) malloc(42);
 
   Expects(Byte_r{std::numeric_limits<int>::max()}.to_string() == "2.000_GiB");
   Expects(Byte_r{std::numeric_limits<uintptr_t>::max()}.to_string() == "16777216.000_TiB");
@@ -425,7 +411,7 @@ int main()
     std::cout << "Protection fault test setup\n";
     std::cout << "* Mapping protected page @ " << prot << "\n";
     mapped = mem::map(prot, "Protected test page");
-    mem::protect((uint64_t)protected_page, mem::Access::read | mem::Access::write);
+    mem::protect_range((uint64_t)protected_page, mem::Access::read | mem::Access::write);
     Expects(mapped && mapped == prot);
   }
 
@@ -441,7 +427,7 @@ int main()
     pml1 = pml2->page_dir(pml2->entry(mapped.lin));
 
     protected_page[magic->i] = 'a';
-    mem::protect((uint64_t)protected_page, mem::Access::read);
+    mem::protect_range((uint64_t)protected_page, mem::Access::read);
     Expects(protected_page[magic->i] == 'a');
     std::cout << "* Writing to write-protected page, expecting page write fail\n\n";
     protected_page[magic->i] = 'b';
@@ -458,7 +444,7 @@ int main()
 
     // Read-protect (e.g. not present)
     std::cout << "* Reading non-present page, expecting page read fail\n\n";
-    mem::protect((uint64_t)protected_page, mem::Access::none);
+    mem::protect_range((uint64_t)protected_page, mem::Access::none);
     Expects(protected_page[magic->i] == 'b');
   }
 
@@ -472,19 +458,19 @@ int main()
 
     // Execute protected page
     std::cout << "* Executing code from execute-protected page, expecting instruction fetch fail\n\n";
-    mem::protect((uint64_t)protected_page, mem::Access::read);
+    mem::protect_range((uint64_t)protected_page, mem::Access::read);
     ((void(*)())(&protected_page[magic->i]))();
   }
 
-  void(*heap_code)() = (void(*)()) malloc(42);
   if (magic->reboots == 3){
     // Verify XD
+    magic->heap_code = (void(*)()) malloc(42);
     Expects(magic->last_error = Page_fault);
     Expects(magic->last_code == (Pfault::present | Pfault::xd));
     Expects(magic->last_access == &protected_page[magic->i]);
     printf("\n%i EXECUTE protection 1/2 PASSED\n", magic->reboots);
-    printf("* Executing heap code @ %p, expecting instruction fetch fail\n\n", heap_code);
-    heap_code();
+    printf("* Executing heap code @ %p, expecting instruction fetch fail\n\n", magic->heap_code);
+    magic->heap_code();
   }
 
   if (magic->reboots == 4) {
@@ -493,7 +479,7 @@ int main()
 
     // Expect last access to be on the same page as heap_code
     auto aligned_last = (uintptr_t)magic->last_access & ~(4_KiB - 1);
-    auto aligned_heap = (uintptr_t)heap_code & ~(4_KiB - 1);
+    auto aligned_heap = (uintptr_t)magic->heap_code & ~(4_KiB - 1);
     Expects(aligned_last == aligned_heap);
 
     printf("\n%i EXECUTE protection 2/2 PASSED\n", magic->reboots);

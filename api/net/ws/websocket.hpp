@@ -22,7 +22,7 @@
 #include "header.hpp"
 
 #include <net/http/server.hpp>
-#include <net/http/client.hpp>
+#include <net/http/basic_client.hpp>
 #include <memory>
 #include <stdexcept>
 #include <vector>
@@ -185,7 +185,7 @@ public:
    * @param[in]  dest      The destination
    * @param[in]  callback  The connect callback
    */
-  static void connect(http::Client&   client,
+  static void connect(http::Basic_client&   client,
                       uri::URI        dest,
                       Connect_handler callback);
 
@@ -209,11 +209,11 @@ public:
    *
    * @return     A Response handler for a http::Client
    */
-  static http::Client::Response_handler
+  static http::Basic_client::Response_handler
   create_response_handler(Connect_handler on_connect, std::string key);
 
   void write(const char* buffer, size_t len, op_code = op_code::TEXT);
-  void write(net::tcp::buffer_t, op_code = op_code::TEXT);
+  void write(Stream::buffer_t, op_code = op_code::TEXT);
 
   void write(const std::string& text)
   {
@@ -233,10 +233,12 @@ public:
     return ping(nullptr, 0, timeout);
   }
 
-  //void ping(net::tcp::buffer_t, Timer::duration_t timeout);
+  //void ping(Stream::buffer_t, Timer::duration_t timeout);
 
   // close the websocket
-  void close();
+  void close(uint16_t reason = 1000);
+
+  void reset_callbacks();
 
   // user callbacks
   close_func   on_close = nullptr;
@@ -270,26 +272,39 @@ public:
     return stream->get_cpuid();
   }
 
+  // 0 == unlimited
+  void set_max_message_size(uint32_t sz) noexcept {
+    max_msg_size = sz;
+  }
+
+  size_t serialize_to(void* p) const /*override*/;
+  /* Create connection from binary data */
+  static std::pair<WebSocket_ptr, size_t> deserialize_from(const void*);
+
   WebSocket(net::Stream_ptr, bool);
-  WebSocket(WebSocket&&);
-  ~WebSocket();
+  ~WebSocket() {
+    assert(m_busy == false && "Cannot delete stream while in its call stack");
+  }
 
 private:
   net::Stream_ptr stream;
   Timer ping_timer{{this, &WebSocket::pong_timeout}};
   Message_ptr message;
-  bool clientside;
+  uint32_t max_msg_size;
+  bool     clientside;
+  bool     m_busy = false;
+  uint16_t m_deferred_close = 0;
 
   WebSocket(const WebSocket&) = delete;
+  WebSocket(WebSocket&&) = delete;
   WebSocket& operator= (const WebSocket&) = delete;
   WebSocket& operator= (WebSocket&&) = delete;
-  void read_data(net::tcp::buffer_t);
+  void read_data(Stream::buffer_t);
   bool write_opcode(op_code code, const char*, size_t);
   void failure(const std::string&);
-  void tcp_closed();
+  void close_callback_once();
   size_t create_message(const uint8_t*, size_t len);
   void finalize_message();
-  void reset();
 
   bool default_on_ping(const char*, size_t)
   { return true; }
@@ -300,7 +315,7 @@ private:
     if (on_pong_timeout)
       on_pong_timeout(*this);
     else
-      this->close();
+      this->close(1000);
   }
 };
 using WebSocket_ptr = WebSocket::WebSocket_ptr;

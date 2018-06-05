@@ -92,12 +92,12 @@ public:
       }
     }
     auto ws = WebSocket::upgrade(*req, *writer);
-    assert(ws->get_cpuid() == SMP::cpu_id());
-
-    if(ws == nullptr) {
+    if (ws == nullptr) {
       debugM("Connector: ws == nullptr - not handled\n");
-    } // not ok
+      return;
+    }
 
+    assert(ws->get_cpuid() == SMP::cpu_id());
     on_connect_(std::move(ws));
   }
 

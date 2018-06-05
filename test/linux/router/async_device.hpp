@@ -18,7 +18,7 @@
 #pragma once
 #include <kernel/events.hpp>
 #include <drivers/usernet.hpp>
-#include <net/inet4>
+#include <net/inet>
 #include <deque>
 
 class Async_device {
@@ -50,6 +50,10 @@ public:
   void set_transmit(transmit_func func) {
     assert(driver != nullptr);
     driver->set_transmit_forward(std::move(func));
+  }
+
+  auto* get_driver() {
+    return this->driver;
   }
 
 private:

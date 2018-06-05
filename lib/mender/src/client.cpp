@@ -29,7 +29,7 @@ namespace mender {
       device_{std::forward<Device>(dev)},
       server_(server),
       cached_{0, port},
-      httpclient_{std::make_unique<http::Client>(tcp)},
+      httpclient_{std::make_unique<http::Basic_client>(tcp)},
       state_(&state::Init::instance()),
       context_({this, &Client::run_state}),
       on_state_store_(nullptr),
@@ -44,7 +44,7 @@ namespace mender {
       device_{std::forward<Device>(dev)},
       server_{socket.address().to_string()},
       cached_(std::move(socket)),
-      httpclient_{std::make_unique<http::Client>(tcp)},
+      httpclient_{std::make_unique<http::Basic_client>(tcp)},
       state_(&state::Init::instance()),
       context_({this, &Client::run_state}),
       on_state_store_(nullptr),
@@ -258,7 +258,9 @@ namespace mender {
     // artifact.update() <- this is what liveupdate wants
 
     //artifact.verify();
-    auto& e = artifact.get_update(0);  // returns element with index
+    const auto& blob = artifact.get_update_blob(0);  // returns element with index
+    auto tar = tar::Reader::read(blob.data(), blob.size());
+    const auto& e = *tar.begin();
 
     device_.inventory("artifact_name") = artifact.name();
 

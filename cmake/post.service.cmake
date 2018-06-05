@@ -43,7 +43,7 @@ endif()
 # Various global defines
 # * OS_TERMINATE_ON_CONTRACT_VIOLATION provides classic assert-like output from Expects / Ensures
 # * _GNU_SOURCE enables POSIX-extensions in newlib, such as strnlen. ("everything newlib has", ref. cdefs.h)
-set(CAPABS "${CAPABS} -fstack-protector-strong -DOS_TERMINATE_ON_CONTRACT_VIOLATION -D_GNU_SOURCE -DSERVICE=\"\\\"${BINARY}\\\"\" -DSERVICE_NAME=\"\\\"${SERVICE_NAME}\\\"\"")
+set(CAPABS "${CAPABS} -fstack-protector-strong -DOS_TERMINATE_ON_CONTRACT_VIOLATION -D_LIBCPP_HAS_MUSL_LIBC -D_GNU_SOURCE -DSERVICE=\"\\\"${BINARY}\\\"\" -DSERVICE_NAME=\"\\\"${SERVICE_NAME}\\\"\"")
 set(WARNS  "-Wall -Wextra") #-pedantic
 
 # Compiler optimization
@@ -94,6 +94,11 @@ endif()
 #
 # DRIVERS / PLUGINS - support for parent cmake list specification
 #
+
+# Add default stdout driver if option is ON
+if (default_stdout)
+  set(DRIVERS ${DRIVERS} default_stdout)
+endif()
 
 # Add extra drivers defined from command line
 set(DRIVERS ${DRIVERS} ${EXTRA_DRIVERS})
@@ -200,6 +205,7 @@ if(LIBRARIES)
 endif()
 
 # add all extra libs
+set(LIBR_CMAKE_NAMES)
 foreach(LIBR ${LIBRARIES})
   # if relative path but not local, use includeos lib.
   if(NOT IS_ABSOLUTE ${LIBR} AND NOT EXISTS ${LIBR})
@@ -209,21 +215,16 @@ foreach(LIBR ${LIBRARIES})
       set(LIBR ${OS_LIB})
     endif()
   endif()
-  get_filename_component(LNAME ${LIBR} NAME_WE)
-  add_library(libr_${LNAME} STATIC IMPORTED)
-  set_target_properties(libr_${LNAME} PROPERTIES LINKER_LANGUAGE CXX)
-  set_target_properties(libr_${LNAME} PROPERTIES IMPORTED_LOCATION ${LIBR})
-
-  target_link_libraries(service libr_${LNAME})
+  # add as whole archive to allow strong symbols
+  list(APPEND LIBR_CMAKE_NAMES "--whole-archive ${LIBR} --no-whole-archive")
 endforeach()
 
 
 # includes
 include_directories(${LOCAL_INCLUDES})
-include_directories(${INSTALL_LOC}/api/posix)
 include_directories(${INSTALL_LOC}/${ARCH}/include/libcxx)
-include_directories(${INSTALL_LOC}/${ARCH}/include/newlib)
-
+include_directories(${INSTALL_LOC}/${ARCH}/include/musl)
+include_directories(${INSTALL_LOC}/${ARCH}/include/libunwind)
 if ("${PLATFORM}" STREQUAL "x86_solo5")
   include_directories(${INSTALL_LOC}/${ARCH}/include/solo5)
 endif()
@@ -260,16 +261,15 @@ if ("${PLATFORM}" STREQUAL "x86_solo5")
   set(PRE_BSS_SIZE  "--defsym PRE_BSS_AREA=0x200000")
 endif()
 
-set(LDFLAGS "-nostdlib -melf_${ELF} -N --eh-frame-hdr ${STRIP_LV} --script=${INSTALL_LOC}/${ARCH}/linker.ld ${PRE_BSS_SIZE} ${INSTALL_LOC}/${ARCH}/lib/crtbegin.o")
+set(LDFLAGS "-nostdlib -melf_${ELF} --eh-frame-hdr ${STRIP_LV} --script=${INSTALL_LOC}/${ARCH}/linker.ld ${PRE_BSS_SIZE}")
 
 set_target_properties(service PROPERTIES LINK_FLAGS "${LDFLAGS}")
 
+set(CRTN "${INSTALL_LOC}/${ARCH}/lib/crtn.o")
+set(CRTI "${INSTALL_LOC}/${ARCH}/lib/crti.o")
 
-add_library(crti STATIC IMPORTED)
-set_target_properties(crti PROPERTIES LINKER_LANGUAGE CXX)
-set_target_properties(crti PROPERTIES IMPORTED_LOCATION ${INSTALL_LOC}/${ARCH}/lib/libcrti.a)
-
-target_link_libraries(service --whole-archive crti --no-whole-archive)
+target_link_libraries(service ${CRTI})
+target_link_libraries(service ${CRT1})
 
 add_library(libos STATIC IMPORTED)
 set_target_properties(libos PROPERTIES LINKER_LANGUAGE CXX)
@@ -297,32 +297,53 @@ if(${ARCH} STREQUAL "x86_64")
   set_target_properties(libcrypto PROPERTIES IMPORTED_LOCATION ${INSTALL_LOC}/${ARCH}/lib/libcrypto.a)
   set(OPENSSL_LIBS libssl libcrypto)
 
-  include_directories(${INSTALL_LOC}/${ARCH}/include/include)
+  include_directories(${INSTALL_LOC}/${ARCH}/include)
 endif()
 
 add_library(libosdeps STATIC IMPORTED)
 set_target_properties(libosdeps PROPERTIES LINKER_LANGUAGE CXX)
 set_target_properties(libosdeps PROPERTIES IMPORTED_LOCATION ${INSTALL_LOC}/${ARCH}/lib/libosdeps.a)
 
+add_library(musl_syscalls STATIC IMPORTED)
+set_target_properties(musl_syscalls PROPERTIES LINKER_LANGUAGE CXX)
+set_target_properties(musl_syscalls PROPERTIES IMPORTED_LOCATION ${INSTALL_LOC}/${ARCH}/lib/libmusl_syscalls.a)
+
 add_library(libcxx STATIC IMPORTED)
 add_library(cxxabi STATIC IMPORTED)
+add_library(libunwind STATIC IMPORTED)
+
 set_target_properties(libcxx PROPERTIES LINKER_LANGUAGE CXX)
 set_target_properties(libcxx PROPERTIES IMPORTED_LOCATION ${INSTALL_LOC}/${ARCH}/lib/libc++.a)
 set_target_properties(cxxabi PROPERTIES LINKER_LANGUAGE CXX)
 set_target_properties(cxxabi PROPERTIES IMPORTED_LOCATION ${INSTALL_LOC}/${ARCH}/lib/libc++abi.a)
+set_target_properties(libunwind PROPERTIES LINKER_LANGUAGE CXX)
+set_target_properties(libunwind PROPERTIES IMPORTED_LOCATION ${INSTALL_LOC}/${ARCH}/lib/libunwind.a)
 
 add_library(libc STATIC IMPORTED)
 set_target_properties(libc PROPERTIES LINKER_LANGUAGE C)
 set_target_properties(libc PROPERTIES IMPORTED_LOCATION ${INSTALL_LOC}/${ARCH}/lib/libc.a)
-add_library(libm STATIC IMPORTED)
-set_target_properties(libm PROPERTIES LINKER_LANGUAGE C)
-set_target_properties(libm PROPERTIES IMPORTED_LOCATION ${INSTALL_LOC}/${ARCH}/lib/libm.a)
-add_library(libg STATIC IMPORTED)
-set_target_properties(libg PROPERTIES LINKER_LANGUAGE C)
-set_target_properties(libg PROPERTIES IMPORTED_LOCATION ${INSTALL_LOC}/${ARCH}/lib/libg.a)
+
+add_library(libpthread STATIC IMPORTED)
+set_target_properties(libpthread PROPERTIES LINKER_LANGUAGE C)
+set_target_properties(libpthread PROPERTIES IMPORTED_LOCATION "${INSTALL_LOC}/${ARCH}/lib/libpthread.a")
+
+# libgcc/compiler-rt detection
+if (UNIX)
+  execute_process(
+      COMMAND ${CMAKE_CXX_COMPILER} --target=${TRIPLE} --print-libgcc-file-name
+      RESULT_VARIABLE CC_RT_RES
+      OUTPUT_VARIABLE COMPILER_RT_FILE OUTPUT_STRIP_TRAILING_WHITESPACE)
+  if (NOT ${CC_RT_RES} EQUAL 0)
+    message(AUTHOR_WARNING "Failed to detect libgcc/compiler-rt: ${COMPILER_RT_FILE}")
+  endif()
+endif()
+if (NOT COMPILER_RT_FILE)
+  set(COMPILER_RT_FILE "${INSTALL_LOC}/${ARCH}/lib/libcompiler.a")
+endif()
+
 add_library(libgcc STATIC IMPORTED)
 set_target_properties(libgcc PROPERTIES LINKER_LANGUAGE C)
-set_target_properties(libgcc PROPERTIES IMPORTED_LOCATION ${INSTALL_LOC}/${ARCH}/lib/libgcc.a)
+set_target_properties(libgcc PROPERTIES IMPORTED_LOCATION "${COMPILER_RT_FILE}")
 
 if ("${PLATFORM}" STREQUAL "x86_solo5")
   add_library(solo5 STATIC IMPORTED)
@@ -375,6 +396,17 @@ function(diskbuilder FOLD)
   endif()
 endfunction()
 
+function(install_certificates FOLD)
+  get_filename_component(REL_PATH "${FOLD}" REALPATH BASE_DIR "${CMAKE_SOURCE_DIR}")
+  message(STATUS "Install certificate bundle at ${FOLD}")
+  file(COPY ${INSTALL_LOC}/cert_bundle/ DESTINATION ${REL_PATH})
+endfunction()
+
+if(CERTS)
+  message(STATUS "Certs folder set: " ${CERTS})
+  install_certificates(${CERTS})
+endif()
+
 if(TARFILE)
   get_filename_component(TAR_RELPATH "${TARFILE}"
                          REALPATH BASE_DIR "${CMAKE_SOURCE_DIR}")
@@ -411,16 +443,17 @@ if(TARFILE)
   target_link_libraries(service --whole-archive tarfile --no-whole-archive)
 endif(TARFILE)
 
-add_library(crtn STATIC IMPORTED)
-set_target_properties(crtn PROPERTIES LINKER_LANGUAGE CXX)
-set_target_properties(crtn PROPERTIES IMPORTED_LOCATION ${INSTALL_LOC}/${ARCH}/lib/libcrtn.a)
-
 if ("${PLATFORM}" STREQUAL "x86_solo5")
-  target_link_libraries(service solo5 --whole-archive crtn --no-whole-archive)
+  target_link_libraries(service solo5)
 endif()
 
 # all the OS and C/C++ libraries + crt end
 target_link_libraries(service
+  libos
+  libplatform
+  libarch
+  
+  ${LIBR_CMAKE_NAMES}
   libos
   libbotan
   ${OPENSSL_LIBS}
@@ -428,45 +461,42 @@ target_link_libraries(service
 
   libplatform
   libarch
-  libos
 
-  libplatform
-  libarch
-  libos
-  libplatform
-
-  cxxabi
-  libc
+  musl_syscalls
   libos
   libcxx
-  libarch
-  libm
-  libg
+  cxxabi
+  libunwind
+  libpthread
+  libc
+
+  musl_syscalls
+  libos
+  libc
   libgcc
-
-
-  ${INSTALL_LOC}/${ARCH}/lib/crtend.o
-  --whole-archive crtn --no-whole-archive
+  ${CRTN}
   )
 # write binary location to known file
 file(WRITE ${CMAKE_BINARY_DIR}/binary.txt ${BINARY})
 
 set(STRIP_LV ${CMAKE_STRIP} --strip-all ${BINARY})
 if (debug)
-  set(STRIP_LV /bin/true)
+  unset(STRIP_LV)
 endif()
 
-add_custom_target(
-  pruned_elf_symbols ALL
-  COMMAND ${INSTALL_LOC}/bin/elf_syms ${BINARY}
-  COMMAND ${CMAKE_OBJCOPY} --update-section .elf_symbols=_elf_symbols.bin ${BINARY} ${BINARY}
-  COMMAND ${STRIP_LV}
-  DEPENDS service
-)
+if (NOT debug)
+  add_custom_target(
+    pruned_elf_symbols ALL
+    COMMAND ${INSTALL_LOC}/bin/elf_syms ${BINARY}
+    COMMAND ${CMAKE_OBJCOPY} --update-section .elf_symbols=_elf_symbols.bin ${BINARY} ${BINARY}
+    COMMAND ${STRIP_LV}
+    DEPENDS service
+    )
+endif()
 
-# create .img files too automatically
+# create bare metal .img: make legacy_bootloader
 add_custom_target(
-  prepend_bootloader ALL
+  legacy_bootloader
   COMMAND ${INSTALL_LOC}/bin/vmbuild ${BINARY} ${INSTALL_LOC}/${ARCH}/boot/bootloader
   DEPENDS service
 )

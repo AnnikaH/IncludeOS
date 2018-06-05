@@ -22,7 +22,7 @@
 #include "transport.hpp"
 #include "config.hpp"
 
-#include <net/inet4>
+#include <net/inet>
 #include <net/http/client.hpp>
 #include <net/ws/websocket.hpp>
 #include <liveupdate.hpp>
@@ -39,7 +39,7 @@ public:
 
   WS_uplink(Config config);
 
-  void start(net::Inet<net::IP4>&);
+  void start(net::Inet&);
 
   void auth();
 
@@ -55,7 +55,7 @@ public:
 
   void send_uplink();
 
-  void update(const std::vector<char>& buffer);
+  void update(std::vector<char> buffer);
 
   void send_error(const std::string& err);
 
@@ -66,13 +66,11 @@ public:
   bool is_online() const
   { return ws_ != nullptr and ws_->is_alive(); }
 
-  void panic(const char* why);
-
 private:
   Config config_;
 
-  net::Inet<net::IP4>&          inet_;
-  std::unique_ptr<http::Client> client_;
+  net::Inet&                   inet_;
+  std::unique_ptr<http::Basic_client> client_;
   net::WebSocket_ptr            ws_;
   std::string                   id_;
   std::string                   token_;
@@ -95,7 +93,7 @@ private:
 
   RTC::timestamp_t update_time_taken = 0;
 
-  void inject_token(http::Request& req, http::Client::Options&, const http::Client::Host)
+  void inject_token(http::Request& req, http::Basic_client::Options&, const http::Basic_client::Host)
   {
     if (not token_.empty())
       req.header().add_field("Authorization", "Bearer " + token_);
