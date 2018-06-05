@@ -60,6 +60,7 @@ Connection::~Connection()
 
 void Connection::_on_read(size_t recv_bufsz, ReadCallback cb)
 {
+  printf("Connection::_on_read\n");
   if(read_request == nullptr)
   {
     read_request = std::make_unique<Read_request>(recv_bufsz, seq_t(this->cb.RCV.NXT), cb);
@@ -126,6 +127,7 @@ uint16_t Connection::MSDS() const noexcept {
 }
 
 size_t Connection::receive(seq_t seq, const uint8_t* data, size_t n, bool PUSH) {
+  printf("Connection::receive\n");
   // should not be called without an read request
   Expects(read_request);
   Expects(n > 0);
@@ -164,7 +166,7 @@ void Connection::write(buffer_t buffer)
 
 void Connection::offer(size_t& packets)
 {
-  debug2("<Connection::offer> %s got offered [%u] packets. Usable window is %u.\n",
+  printf("<Connection::offer> %s got offered [%zu] packets. Usable window is %u.\n",
         to_string().c_str(), packets, usable_window());
 
   // write until we either cant send more (window closes or no more in queue),
@@ -187,15 +189,12 @@ void Connection::offer(size_t& packets)
 
     packet->set_flag(ACK);
 
-    debug2("<Connection::offer> Wrote %u bytes (%u remaining) with [%u] packets left and a usable window of %u.\n",
-           written, buf.remaining, packets, usable_window());
-
     if(!can_send() or !packets or !writeq.nxt_rem())
       packet->set_flag(PSH);
 
     if(UNLIKELY(not writeq.has_remaining_requests() and is_closing()))
     {
-      debug("<Connection::offer> Setting FIN\n");
+      printf("<Connection::offer> Setting FIN\n");
       packet->set_flag(FIN);
       cb.SND.NXT++;
     }
@@ -203,7 +202,7 @@ void Connection::offer(size_t& packets)
     transmit(std::move(packet));
   }
 
-  debug2("<Connection::offer> Finished working offer with [%u] packets left and a queue of (%u) with a usable window of %i\n",
+  printf("<Connection::offer> Finished working offer with [%u] packets left and a queue of (%u) with a usable window of %i\n",
         packets, writeq.size(), usable_window());
 
   if (this->can_send() and not this->is_queued())
@@ -214,7 +213,7 @@ void Connection::offer(size_t& packets)
 
 void Connection::writeq_push()
 {
-  debug2("<Connection::writeq_push> Processing writeq, queued=%u\n", queued_);
+  printf("<Connection::writeq_push> Processing writeq, queued=%u\n", queued_);
   while(not queued_ and can_send())
     host_.request_offer(*this);
 }
@@ -223,7 +222,7 @@ void Connection::limited_tx() {
 
   auto packet = create_outgoing_packet();
 
-  debug2("<Connection::limited_tx> UW: %u CW: %u, FS: %u\n", usable_window(), cb.cwnd, flight_size());
+  printf("<Connection::limited_tx> UW: %u CW: %u, FS: %u\n", usable_window(), cb.cwnd, flight_size());
 
   const auto written = fill_packet(*packet, writeq.nxt_data(), writeq.nxt_rem());
   cb.SND.NXT += written;
@@ -233,7 +232,7 @@ void Connection::limited_tx() {
 
   if(UNLIKELY(not writeq.has_remaining_requests() and is_closing()))
   {
-    debug("<Connection::limited_tx> Setting FIN\n");
+    printf("<Connection::limited_tx> Setting FIN\n");
     packet->set_flag(FIN);
     cb.SND.NXT++;
   }
@@ -242,19 +241,19 @@ void Connection::limited_tx() {
 }
 
 void Connection::writeq_reset() {
-  debug2("<Connection::writeq_reset> Reseting.\n");
+  printf("<Connection::writeq_reset> Reseting.\n");
   writeq.reset();
   rtx_timer.stop();
 }
 
 void Connection::open(bool active)
 {
-  debug("<TCP::Connection::open> Trying to open Connection...\n");
+  printf("<TCP::Connection::open> Trying to open Connection...\n");
   state_->open(*this, active);
 }
 
 void Connection::close() {
-  debug("<TCP::Connection::close> Active close on connection. \n");
+  printf("<TCP::Connection::close> Active close on connection. \n");
 
   if(is_closing())
     return;
@@ -283,6 +282,7 @@ void Connection::receive_disconnect() {
 
 void Connection::segment_arrived(Packet_ptr incoming)
 {
+  printf("Connection::segment_arrived: %u\n", incoming->ip_total_length());
   //const uint32_t FMASK = (~(0x0000000F | htons(0x08)));
   //uint32_t FMASK = 0xFFFFF7F0;
   //uint32_t FMASK = (((0xf000 | SYN|FIN|RST|URG|ACK) << 16) | 0xffff);
@@ -298,7 +298,7 @@ void Connection::segment_arrived(Packet_ptr incoming)
     case State::OK:
       return; // // Do nothing.
     case State::CLOSED:
-      debug("<TCP::Connection::receive> (%s => %s) State handle finished with CLOSED. We're done, ask host() to delete the connection.\n",
+      printf("<TCP::Connection::receive> (%s => %s) State handle finished with CLOSED. We're done, ask host() to delete the connection.\n",
         prev_state_->to_string().c_str(), state_->to_string().c_str());
       writeq_reset();
       signal_close();
@@ -344,7 +344,7 @@ Packet_ptr Connection::create_outgoing_packet()
 
   // Set SEQ and ACK
   packet->set_seq(cb.SND.NXT).set_ack(cb.RCV.NXT);
-  debug("<TCP::Connection::create_outgoing_packet> Outgoing packet created: %s \n", packet->to_string().c_str());
+  printf("<TCP::Connection::create_outgoing_packet> Outgoing packet created: %s \n", packet->to_string().c_str());
 
   return packet;
 }
@@ -354,7 +354,7 @@ void Connection::transmit(Packet_ptr packet) {
     and !rttm.active()
     and packet->end() == cb.SND.NXT)
   {
-    //printf("<TCP::Connection::transmit> Starting RTT measurement.\n");
+    printf("<TCP::Connection::transmit> Starting RTT measurement.\n");
     rttm.start(std::chrono::milliseconds{host_.get_ts_value()});
   }
   if(packet->should_rtx() and !rtx_timer.is_running()) {
@@ -370,7 +370,7 @@ void Connection::transmit(Packet_ptr packet) {
 
 bool Connection::handle_ack(const Packet& in)
 {
-  //printf("<Connection> RX ACK: %s\n", in.to_string().c_str());
+  printf("<Connection> RX ACK: %s\n", in.to_string().c_str());
 
   // Calculate true window due to WS option
   const uint32_t true_win = in.win() << cb.SND.wind_shift;
@@ -387,6 +387,7 @@ bool Connection::handle_ack(const Packet& in)
   // Needs to be checked before (SEG.ACK >= SND.UNA)
   if(UNLIKELY(is_dup_ack(in, true_win)))
   {
+    printf("Connection::handle_ack: is_dup_ack");
     dup_acks_++;
     on_dup_ack(in);
     return false;
@@ -400,7 +401,7 @@ bool Connection::handle_ack(const Packet& in)
       cb.SND.WND = true_win;
       cb.SND.WL1 = in.seq();
       cb.SND.WL2 = in.ack();
-      //printf("<Connection::handle_ack> Window update (%u)\n", cb.SND.WND);
+      printf("<Connection::handle_ack> Window update (%u)\n", cb.SND.WND);
     }
     //pred_flags = htonl((in.tcp_header_length() << 26) | 0x10 | cb.SND.WND >> cb.SND.wind_shift);
 
@@ -449,7 +450,7 @@ void Connection::congestion_control(const Packet& in)
   if(cb.slow_start())
   {
     reno_increase_cwnd(bytes_acked);
-    debug2("<Connection::handle_ack> Slow start. cwnd=%u uw=%u\n",
+    printf("<Connection::congestion_control> Slow start. cwnd=%u uw=%u\n",
       cb.cwnd, usable_window());
   }
   // congestion avoidance
@@ -457,14 +458,14 @@ void Connection::congestion_control(const Packet& in)
   {
     // increase cwnd once per RTT
     cb.cwnd += std::max(SMSS()*SMSS()/cb.cwnd, (uint32_t)1);
-    debug2("<Connection::handle_ack> Congestion avoidance. cwnd=%u uw=%u\n",
+    printf("<Connection::congestion_control> Congestion avoidance. cwnd=%u uw=%u\n",
       cb.cwnd, usable_window());
   } // < congestion avoidance
 
   // try to write
   if(can_send() and !in.has_tcp_data())
   {
-    debug2("<Connection::handle_ack> Can send UW: %u SMSS: %u\n", usable_window(), SMSS());
+    printf("<Connection::congestion_control> Can send UW: %u SMSS: %u\n", usable_window(), SMSS());
     send_much();
   }
 }
@@ -480,7 +481,7 @@ void Connection::fast_recovery(const Packet& in)
   if(in.ack() < cb.recover)
   {
     const size_t bytes_acked = highest_ack_ - prev_highest_ack_;
-    debug2("<Connection::handle_ack> Partial ACK - recover: %u NXT: %u ACK: %u\n", cb.recover, cb.SND.NXT, in.ack());
+    printf("<Connection::fast_recovery> Partial ACK - recover: %u NXT: %u ACK: %u\n", cb.recover, cb.SND.NXT, in.ack());
     reno_deflate_cwnd(bytes_acked);
     // RFC 4015
     /*
@@ -539,7 +540,7 @@ void Connection::fast_recovery(const Packet& in)
   */
   else
   {
-    debug2("<Connection::handle_ack> Full ACK.\n");
+    printf("<Connection::fast_recovery> Full ACK.\n");
     finish_fast_recovery();
     writeq_push();
   } // < full ack
@@ -573,7 +574,7 @@ void Connection::on_dup_ack(const Packet& in)
   // 3 dup acks
   else if(dup_acks_ == 3)
   {
-    debug("<TCP::Connection::on_dup_ack> Dup ACK == 3 - %u\n", cb.SND.UNA);
+    printf("<TCP::Connection::on_dup_ack> Dup ACK == 3 - %u\n", cb.SND.UNA);
 
     if(cb.SND.UNA - 1 > cb.recover)
       goto fast_rtx;
@@ -598,7 +599,7 @@ void Connection::on_dup_ack(const Packet& in)
     fast_rtx:
     {
       cb.recover = cb.SND.NXT;
-      debug("<TCP::Connection::on_dup_ack> Enter Recovery - Flight Size: %u\n", flight_size());
+      printf("<TCP::Connection::on_dup_ack> Enter Recovery - Flight Size: %u\n", flight_size());
       fast_retransmit();
     }
   }
@@ -644,8 +645,7 @@ void Connection::rtx_ack(const seq_t ack) {
     rtx_attempt_ = 0;
   }
 
-  //printf("<TCP::Connection::rt_acknowledge> ACK'ed %u packets. rtx_q: %u\n",
-  //  x-rtx_q.size(), rtx_q.size());
+  printf("<TCP::Connection::rt_acknowledge> ACK'ed packets\n");
 }
 
 /*
@@ -740,6 +740,7 @@ void Connection::recv_data(const Packet& in)
 // This makes everything much easier.
 void Connection::recv_out_of_order(const Packet& in)
 {
+  printf("Connection::recv_out_of_order\n");
   // Packets before this point would totally ruin the buffer
   Expects((in.seq() - cb.RCV.NXT) < cb.RCV.WND);
   // We know that out of order packets wouldnt reach here
@@ -859,9 +860,11 @@ void Connection::take_rtt_measure(const Packet& packet)
 
 */
 void Connection::retransmit() {
+  printf("Connection::retransmit\n");
   auto packet = create_outgoing_packet();
   // If not retransmission of a pure SYN packet, add ACK
   if(!is_state(SynSent::instance())) {
+    printf("Set flag ACK\n");
     packet->set_flag(ACK);
   }
   // If retransmission from either SYN-SENT or SYN-RCV, add SYN
@@ -874,8 +877,8 @@ void Connection::retransmit() {
   // If not, check if there is data and retransmit
   else if(writeq.size()) {
     auto& buf = writeq.una();
-    debug2("<Connection::retransmit> With data (wq.sz=%u) buf.unacked=%u\n",
-      writeq.size(), buf.length() - buf.acknowledged);
+    printf("<Connection::retransmit> With data (wq.sz=%zu) buf.unacked=%u\n",
+      writeq.size(), buf->size() - writeq.acked());
     fill_packet(*packet, buf->data() + writeq.acked(), buf->size() - writeq.acked());
   }
   rtx_attempt_++;
@@ -916,14 +919,14 @@ void Connection::retransmit() {
   if(packet->should_rtx() and !rtx_timer.is_running()) {
     rtx_start();
   }
-  debug("<Connection::retransmit> RTX: %s\n", packet->to_string().c_str());
+  printf("<Connection::retransmit> RTX: %s\n", packet->to_string().c_str());
   host_.transmit(std::move(packet));
 }
 
 void Connection::rtx_clear() {
   if(rtx_timer.is_running()) {
     rtx_stop();
-    debug2("<Connection::rtx_clear> Rtx cleared\n");
+    printf("<Connection::rtx_clear> Rtx cleared\n");
   }
 }
 
@@ -947,13 +950,13 @@ void Connection::rtx_clear() {
        begins (i.e., after the three-way handshake completes).
 */
 void Connection::rtx_timeout() {
-  debug("<Connection::RTX@timeout> Timed out (RTO %lld ms). FS: %u\n",
+  printf("<Connection::RTX@timeout> Timed out (RTO %lld ms). FS: %u\n",
     rttm.rto_ms().count(), flight_size());
 
   signal_rtx_timeout();
   // experimental
   if(rto_limit_reached()) {
-    debug("<TCP::Connection::rtx_timeout> RTX attempt limit reached, closing.\n");
+    printf("<TCP::Connection::rtx_timeout> RTX attempt limit reached, closing.\n");
     abort();
     return;
   }
@@ -1020,7 +1023,7 @@ seq_t Connection::generate_iss() {
 void Connection::set_state(State& state) {
   prev_state_ = state_;
   state_ = &state;
-  debug("<TCP::Connection::set_state> %s => %s \n",
+  printf("<TCP::Connection::set_state> %s => %s \n",
         prev_state_->to_string().c_str(), state_->to_string().c_str());
 }
 
@@ -1069,7 +1072,7 @@ void Connection::signal_close()
     return;
   close_signaled_ = true;
 
-  debug("<Connection::signal_close> It's time to delete this connection. \n");
+  printf("<Connection::signal_close> It's time to delete this connection. \n");
 
   // call user callback
   if(on_close_) on_close_();
@@ -1100,7 +1103,7 @@ void Connection::clean_up() {
     read_request->callback.reset();
   _on_cleanup_.reset();
 
-  debug("<Connection::clean_up> Succesfully cleaned up %s\n", to_string().c_str());
+  printf("<Connection::clean_up> Succesfully cleaned up %s\n", to_string().c_str());
 }
 
 std::string Connection::TCB::to_string() const {
@@ -1145,7 +1148,7 @@ void Connection::parse_options(const Packet& packet) {
       auto* opt_mss = (Option::opt_mss*)option;
       cb.SND.MSS = ntohs(opt_mss->mss);
 
-      debug2("<TCP::parse_options@Option:MSS> MSS: %u \n", cb.SND.MSS);
+      printf("<TCP::parse_options@Option:MSS> MSS: %u \n", cb.SND.MSS);
 
       opt += option->length;
       break;
@@ -1165,7 +1168,7 @@ void Connection::parse_options(const Packet& packet) {
         cb.SND.wind_shift = std::min(opt_ws.shift_cnt, (uint8_t)14);
         cb.RCV.wind_shift = host_.wscale();
 
-        debug2("<Connection::parse_options@WS> WS: %u Calc: %u\n",
+        printf("<Connection::parse_options@WS> WS: %u Calc: %u\n",
           cb.SND.wind_shift, cb.SND.WND << cb.SND.wind_shift);
       }
 
@@ -1223,7 +1226,7 @@ void Connection::add_option(Option::Kind kind, Packet& packet) {
 
   case Option::MSS: {
     packet.add_tcp_option<Option::opt_mss>(host_.MSS());
-    debug2("<TCP::Connection::add_option@Option::MSS> Packet: %s - MSS: %u\n",
+    printf("<TCP::Connection::add_option@Option::MSS> Packet: %s - MSS: %u\n",
            packet.to_string().c_str(), ntohs(*(uint16_t*)(packet.tcp_options()+2)));
     break;
   }
@@ -1293,12 +1296,12 @@ void Connection::reduce_ssthresh() {
     fs = (fs >= two_seg) ? fs - two_seg : 0;
 
   cb.ssthresh = std::max( (fs / 2), two_seg );
-  debug2("<TCP::Connection::reduce_ssthresh> Slow start threshold reduced: %u\n",
+  printf("<TCP::Connection::reduce_ssthresh> Slow start threshold reduced: %u\n",
     cb.ssthresh);
 }
 
 void Connection::fast_retransmit() {
-  debug("<TCP::Connection::fast_retransmit> Fast retransmit initiated.\n");
+  printf("<TCP::Connection::fast_retransmit> Fast retransmit initiated.\n");
   // reduce sshtresh
   reduce_ssthresh();
   // retransmit segment starting SND.UNA
@@ -1313,5 +1316,5 @@ void Connection::finish_fast_recovery() {
   fast_recovery_ = false;
   //cb.cwnd = std::min(cb.ssthresh, std::max(flight_size(), (uint32_t)SMSS()) + SMSS());
   cb.cwnd = cb.ssthresh;
-  debug("<TCP::Connection::finish_fast_recovery> Finished Fast Recovery - Cwnd: %u\n", cb.cwnd);
+  printf("<TCP::Connection::finish_fast_recovery> Finished Fast Recovery - Cwnd: %u\n", cb.cwnd);
 }

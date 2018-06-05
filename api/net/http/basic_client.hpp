@@ -244,12 +244,12 @@ namespace http {
   /* POST */
   inline void Basic_client::post(URI url, Header_set hfields, std::string data,
                            Response_handler cb, Options options)
-  { request(POST, std::move(url), std::move(hfields), std::move(data), std::move(cb), std::move(options)); }
+  { printf("Basic HTTP client - creating request 1\n"); request(POST, std::move(url), std::move(hfields), std::move(data), std::move(cb), std::move(options)); }
 
   inline void Basic_client::post(Host host, std::string path, Header_set hfields,
                            const std::string& data, Response_handler cb,
                            const bool secure, Options options)
-  { request(POST, std::move(host), std::move(path), std::move(hfields), std::move(data), std::move(cb), secure, std::move(options)); }
+  { printf("Basic HTTP client - creating request 2\n"); request(POST, std::move(host), std::move(path), std::move(hfields), std::move(data), std::move(cb), secure, std::move(options)); }
 
 
 } // < namespace http

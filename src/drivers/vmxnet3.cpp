@@ -119,7 +119,7 @@ vmxnet3::vmxnet3(hw::PCI_Device& d, const uint16_t mtu) :
     Link(Link_protocol{{this, &vmxnet3::transmit}, mac()}, bufstore_),
     m_pcidev(d), m_mtu(mtu), bufstore_{1024, buffer_size_for_mtu(mtu)}
 {
-  INFO("vmxnet3", "Driver initializing (rev=%#x)", d.rev_id());
+  printf("vmxnet3: Driver initializing (rev=%#x)\n", d.rev_id());
   assert(d.rev_id() == REVISION_ID);
 
   // find and store capabilities
@@ -131,7 +131,7 @@ vmxnet3::vmxnet3(hw::PCI_Device& d, const uint16_t mtu) :
   {
     d.init_msix();
     uint8_t msix_vectors = d.get_msix_vectors();
-    INFO2("[x] Device has %u MSI-X vectors", msix_vectors);
+    printf("[x] Device has %u MSI-X vectors\n", msix_vectors);
     assert(msix_vectors >= 3);
     if (msix_vectors > 2 + NUM_RX_QUEUES) msix_vectors = 2 + NUM_RX_QUEUES;
 
@@ -171,10 +171,10 @@ vmxnet3::vmxnet3(hw::PCI_Device& d, const uint16_t mtu) :
   // check link status
   auto link_spd = check_link();
   if (link_spd) {
-    INFO2("Link up at %u Mbps", link_spd);
+    printf("Link up at %u Mbps\n", link_spd);
   }
   else {
-    INFO2("LINK DOWN! :(");
+    printf("LINK DOWN! :(\n");
     return;
   }
 
@@ -278,7 +278,7 @@ bool vmxnet3::check_version()
 {
   uint32_t maj_ver = mmio_read32(this->iobase + 0x0);
   uint32_t min_ver = mmio_read32(this->iobase + 0x8);
-  INFO("vmxnet3", "Version %d.%d", maj_ver, min_ver);
+  printf("vmxnet3: Version %d.%d\n", maj_ver, min_ver);
 
   // select version we support
   mmio_write32(this->iobase + 0x0, 0x1);
@@ -310,7 +310,7 @@ void vmxnet3::retrieve_hwaddr()
   mac.hi = mmio_read32(this->iobase + VMXNET3_VD_MAC_HI);
   // ETH_ALEN = 6
   memcpy(&this->hw_addr, &mac, sizeof(hw_addr));
-  INFO2("MAC address: %s", hw_addr.to_string().c_str());
+  printf("MAC address: %s\n", hw_addr.to_string().c_str());
 }
 void vmxnet3::set_hwaddr(MAC::Addr& addr)
 {
@@ -372,6 +372,7 @@ void vmxnet3::refill(rxring_state& rxq)
 net::Packet_ptr
 vmxnet3::recv_packet(uint8_t* data, uint16_t size)
 {
+  printf("vmxnet3::recv_packet\n");
   auto* ptr = (net::Packet*) (data - DRIVER_OFFSET - sizeof(net::Packet));
   new (ptr) net::Packet(
         DRIVER_OFFSET,
@@ -383,6 +384,7 @@ vmxnet3::recv_packet(uint8_t* data, uint16_t size)
 net::Packet_ptr
 vmxnet3::create_packet(int link_offset)
 {
+  printf("vmxnet3::create_packet\n");
   auto buffer = bufstore().get_buffer();
   auto* ptr = (net::Packet*) buffer.addr;
   new (ptr) net::Packet(
@@ -395,6 +397,7 @@ vmxnet3::create_packet(int link_offset)
 
 void vmxnet3::msix_evt_handler()
 {
+  printf("vmxnet3::msix_evt_handler\n");
   uint32_t evts = dma->shared.ecr;
   if (evts == 0) return;
   // ack all events
@@ -426,12 +429,14 @@ void vmxnet3::msix_evt_handler()
 }
 void vmxnet3::msix_xmit_handler()
 {
+  printf("vmxnet3::msix_xmit_handler\n");
   this->disable_intr(1);
   this->transmit_handler();
   this->enable_intr(1);
 }
 void vmxnet3::msix_recv_handler()
 {
+  printf("vmxnet3::msix_recv_handler\n");
   for (int q = 0; q < NUM_RX_QUEUES; q++)
   {
       this->disable_intr(2 + q);
@@ -442,6 +447,7 @@ void vmxnet3::msix_recv_handler()
 
 bool vmxnet3::transmit_handler()
 {
+  printf("vmxnet3::transmit_handler\n");
   bool transmitted = false;
   while (true)
   {
@@ -478,6 +484,7 @@ bool vmxnet3::transmit_handler()
 }
 bool vmxnet3::receive_handler(const int Q)
 {
+  printf("vmxnet3::receive_handler\n");
   std::vector<net::Packet_ptr> recvq;
   while (true)
   {
@@ -511,6 +518,7 @@ bool vmxnet3::receive_handler(const int Q)
 
 void vmxnet3::transmit(net::Packet_ptr pckt_ptr)
 {
+  printf("vmxnet3::transmit pckt size: %u\n", pckt_ptr->size());
   if (sendq == nullptr)
       sendq = std::move(pckt_ptr);
   else
@@ -556,6 +564,8 @@ void vmxnet3::transmit_data(uint8_t* data, uint16_t data_length)
   auto gen = (tx.producers & vmxnet3::NUM_TX_DESC) ? 0 : VMXNET3_TXF_GEN;
   tx.producers++;
 
+  printf("vmxnet3::transmit_data\n");
+
   assert(tx.buffers[idx] == nullptr);
   tx.buffers[idx] = data;
 
@@ -567,9 +577,10 @@ void vmxnet3::transmit_data(uint8_t* data, uint16_t data_length)
 
 void vmxnet3::flush()
 {
+  printf("vmxnet3::flush\n");
   if (tx_flush_diff() > 0)
   {
-
+    printf("flushing\n");
     auto idx = tx.producers % vmxnet3::NUM_TX_DESC;
     mmio_write32(ptbase + VMXNET3_PT_TXPROD, idx);
     tx.flushvalue = tx.producers;
@@ -578,6 +589,7 @@ void vmxnet3::flush()
 
 void vmxnet3::handle_deferred()
 {
+  printf("vmxnet3::handle_deferred\n");
   for (auto* dev : deferred_devs)
   {
     dev->flush();

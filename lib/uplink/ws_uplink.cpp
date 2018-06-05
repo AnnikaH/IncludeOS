@@ -134,6 +134,7 @@ namespace uplink {
         http::Basic_client::Request_handler{this, &WS_uplink::inject_token});
     }
 
+    printf("WS_uplink::start: Calling auth()\n");
     auth();
   }
 

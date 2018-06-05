@@ -287,6 +287,7 @@ namespace openssl
   }
   inline int TLS_stream::tls_perform_handshake()
   {
+    printf("TLS_stream::tls_perform_handshake\n");
     ERR_clear_error(); // prevent old errors from mucking things up
     // will return -1:SSL_ERROR_WANT_WRITE
     int ret = SSL_do_handshake(this->m_ssl);
@@ -297,13 +298,13 @@ namespace openssl
       do {
         n = tls_perform_stream_write();
         if (n < 0) {
-          TLS_PRINT("TLS_stream::tls_perform_handshake() stream write failed\n");
+          printf("TLS_stream::tls_perform_handshake() stream write failed\n");
         }
       } while (n > 0);
       return n;
     }
     else {
-      TLS_PRINT("TLS_stream::tls_perform_handshake() returned %d\n", ret);
+      printf("TLS_stream::tls_perform_handshake() returned %d\n", ret);
       this->close();
       return -1;
     }
@@ -311,6 +312,7 @@ namespace openssl
 
   inline void TLS_stream::close()
   {
+    printf("TLS_stream::close\n");
     ERR_clear_error();
     if (this->m_busy) {
       m_deferred_close = true; return;
@@ -337,10 +339,12 @@ namespace openssl
 
   inline bool TLS_stream::handshake_completed() const noexcept
   {
+    printf("TLS_stream::handshake_completed - going to SSL_is_init_finished\n");
     return SSL_is_init_finished(this->m_ssl);
   }
   inline TLS_stream::status_t TLS_stream::status(int n) const noexcept
   {
+    printf("TLS_stream::status\n");
     int error = SSL_get_error(this->m_ssl, n);
     switch (error)
     {

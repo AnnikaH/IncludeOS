@@ -74,6 +74,7 @@ namespace http {
   void Basic_client::request(Method method, URI url, Header_set hfields,
                        Response_handler cb, Options options)
   {
+    printf("Basic_client::request\n");
     Expects(cb != nullptr);
 
     // find out if this is a secured request or not
@@ -84,6 +85,7 @@ namespace http {
 
     if (url.host_is_ip4())
     {
+      printf("Host is IP4\n");
       std::string host(url.host());
       auto ip = net::ip4::Addr(host);
       // setup request with method and headers
@@ -93,13 +95,16 @@ namespace http {
       // Set Host and URI path
       populate_from_url(*req, url);
 
+      printf("After populate_from_url\n");
       // Default to port 80 if non given
       const uint16_t port = (url.port() != 0xFFFF) ? url.port() : 80;
 
+      printf("Sending\n");
       send(move(req), {ip, port}, move(cb), secure, move(options));
     }
     else
     {
+      printf("ELSE\n");
       tcp_.stack().resolve(std::string(url.host()),
       ResolveCallback::make_packed(
       [
@@ -113,6 +118,7 @@ namespace http {
       ]
         (net::ip4::Addr ip, const net::Error&)
       {
+        printf("Resolve callback make packed\n");
         // Host resolved
         if (ip != 0)
         {
@@ -140,6 +146,7 @@ namespace http {
                        Header_set hfields, Response_handler cb,
                       const bool secure, Options options)
   {
+    printf("Basic_client::request type 2\n");
     validate_secure(secure);
 
     using namespace std;
@@ -150,6 +157,7 @@ namespace http {
     //set uri (default "/")
     req->set_uri((!path.empty()) ? URI{move(path)} : URI{"/"});
 
+    printf("Basic_client::request type 2: Sending...\n");
     send(move(req), move(host), move(cb), secure, move(options));
   }
 

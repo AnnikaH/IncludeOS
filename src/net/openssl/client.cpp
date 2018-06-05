@@ -26,6 +26,7 @@ static void
 tls_load_from_memory(X509_STORE* store,
                      fs::Buffer cert_buffer)
 {
+  printf("tls_load_from_memory\n");
   auto* cbio = BIO_new_mem_buf(cert_buffer.data(), cert_buffer.size());
   auto* cert = PEM_read_bio_X509(cbio, NULL, 0, NULL);
   assert(cert != NULL && "Invalid certificate");
@@ -37,6 +38,7 @@ tls_load_from_memory(X509_STORE* store,
 static void
 tls_private_key_for_ctx(SSL_CTX* ctx, int bits = 2048)
 {
+  printf("tls_private_key_for_ctx\n");
   BIGNUM* bne = BN_new();
   assert(BN_set_word(bne, RSA_F4) == 1);
 
@@ -44,12 +46,14 @@ tls_private_key_for_ctx(SSL_CTX* ctx, int bits = 2048)
   int ret = RSA_generate_key_ex(rsa, bits, bne, NULL);
   assert(ret == 1);
 
+  printf("tls_private_key_for_ctx calling SSL_CTX_use_RSAPrivateKey\n");
   SSL_CTX_use_RSAPrivateKey(ctx, rsa);
 }
 
 static SSL_CTX*
 tls_init_client(fs::List ents)
 {
+  printf("tls_init_client\n");
   /* create the SSL server context */
   auto meth = TLSv1_2_method();
   auto* ctx = SSL_CTX_new(meth);
@@ -113,17 +117,23 @@ namespace openssl
 {
   SSL_CTX* create_client(fs::List ents, bool verify_peer)
   {
-    INFO("OpenSSL", "Initializing client context");
+    printf("OpenSSL: Initializing client context\n");
     auto* ctx = tls_init_client(ents);
+    printf("OpenSSL: CHECK verify_peer\n");
     CHECK(verify_peer, "Verify peer");
     if (verify_peer) client_verify_peer(ctx);
+    printf("OpenSSL: Returning client context\n");
     return ctx;
   }
 
   void client_verify_peer(SSL_CTX* ctx)
   {
+    printf("OpenSSL: client_verify_peer\n");
     SSL_CTX_set_verify(ctx, SSL_VERIFY_PEER|SSL_VERIFY_CLIENT_ONCE, &verify_cb);
+    printf("OpenSSL: After SSL_CTX_set_verify\n");
     SSL_CTX_set_verify_depth(ctx, 20);
+    printf("OpenSSL: After SSL_CTX_set_verify_depth\n");
     tls_check_for_errors();
+    printf("OpenSSL: After tls_check_for_errors\n");
   }
 }
