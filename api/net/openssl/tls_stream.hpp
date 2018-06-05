@@ -313,9 +313,9 @@ namespace openssl
   inline void TLS_stream::close()
   {
     printf("TLS_stream::close\n");
-    ERR_clear_error();
+    //ERR_clear_error();
     if (this->m_busy) {
-      m_deferred_close = true; return;
+      this->m_deferred_close = true; return;
     }
     CloseCallback func = std::move(this->m_on_close);
     this->reset_callbacks();
@@ -325,6 +325,9 @@ namespace openssl
   }
   inline void TLS_stream::close_callback_once()
   {
+    if (this->m_busy) {
+      this->m_deferred_close = true; return;
+    }
     CloseCallback func = std::move(this->m_on_close);
     this->reset_callbacks();
     if (func) func();
